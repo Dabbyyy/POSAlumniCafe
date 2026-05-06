@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { saveTransaction } from './transactions';
-import { getMenuItems, MenuItem, addMenuItem, deleteMenuItem } from './menuStorage';
+import { saveTransaction, updateCashierNames } from './transactions';
+import { getMenuItems, MenuItem, addMenuItem, deleteMenuItem, getMenuCategories } from './menuStorage';
 import { getCashiers, addCashier, deleteCashier, CashierAccount } from './cashierStorage';
 import {
   Coffee,
@@ -80,15 +80,6 @@ const PRODUCTS: Product[] = [
   { id: 30, name: 'Buko Pandan', price: 85, category: 'Desserts', icon: '🍧' },
 ];
 
-const CATEGORIES = [
-  { name: 'All Items', icon: '📦' },
-  { name: 'Coffee', icon: '☕' },
-  { name: 'Non-Coffee', icon: '🧋' },
-  { name: 'Food', icon: '🍞' },
-  { name: 'Pastry & Snacks', icon: '🥐' },
-  { name: 'Desserts', icon: '🍰' },
-];
-
 const VAT_RATE = 0.12;
 
 export default function App() {
@@ -99,6 +90,12 @@ export default function App() {
     const isAuth = localStorage.getItem('cashier_auth') === 'true';
     if (!isAuth) {
       navigate('/login');
+    } else {
+      // Migrate legacy staff name to current cashier name
+      const name = localStorage.getItem('cashier_name');
+      if (name) {
+        updateCashierNames('Staff 01', name);
+      }
     }
   }, [navigate]);
 
@@ -123,16 +120,21 @@ export default function App() {
   const [isCartExpanded, setIsCartExpanded] = useState(true);
   const [animations, setAnimations] = useState<{ id: number; key: number }[]>([]);
   const [products, setProducts] = useState<MenuItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   
   const [newProduct, setNewProduct] = useState({ name: '', price: 0, category: 'Coffee', icon: '☕' });
 
   // --- Effects ---
   useEffect(() => {
     setProducts(getMenuItems());
+    setCategories(getMenuCategories());
     const timer = setInterval(() => setTime(new Date()), 1000);
     // Refresh menu items periodically in case admin changes them
-    const menuRefresh = setInterval(() => setProducts(getMenuItems()), 2000);
-    return () => { clearInterval(timer); clearInterval(menuRefresh); };
+    const refresh = setInterval(() => {
+      setProducts(getMenuItems());
+      setCategories(getMenuCategories());
+    }, 2000);
+    return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
 
   useEffect(() => {
@@ -223,7 +225,7 @@ export default function App() {
       id: txnNumber,
       date: now.toISOString(),
       time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }),
-      cashier: 'Staff 01',
+      cashier: cashierName,
       items: cart.map(item => ({
         name: item.name,
         quantity: item.quantity,
@@ -332,20 +334,31 @@ export default function App() {
               <Tag className="w-3 h-3 text-hcdc-gold" /> Menu Categories
             </h2>
             <nav className="flex flex-col gap-3">
-              {CATEGORIES.map((cat) => (
+              <button
+                onClick={() => setCurrentCategory('All Items')}
+                className={`flex items-center gap-5 px-6 py-4 rounded-2xl transition-all duration-300 group text-left relative overflow-hidden ${currentCategory === 'All Items'
+                    ? 'bg-hcdc-blue text-white shadow-xl shadow-hcdc-blue/20 translate-x-1'
+                    : 'hover:bg-hcdc-light-blue text-gray-500 hover:text-hcdc-blue'
+                  }`}
+              >
+                {currentCategory === 'All Items' && (
+                  <motion.div layoutId="activeCat" className="absolute left-0 top-0 bottom-0 w-1.5 bg-hcdc-red" />
+                )}
+                <span className="text-sm font-bold tracking-tight">All Items</span>
+              </button>
+              {categories.map((cat) => (
                 <button
-                  key={cat.name}
-                  onClick={() => setCurrentCategory(cat.name)}
-                  className={`flex items-center gap-5 px-6 py-4 rounded-2xl transition-all duration-300 group text-left relative overflow-hidden ${currentCategory === cat.name
+                  key={cat}
+                  onClick={() => setCurrentCategory(cat)}
+                  className={`flex items-center gap-5 px-6 py-4 rounded-2xl transition-all duration-300 group text-left relative overflow-hidden ${currentCategory === cat
                       ? 'bg-hcdc-blue text-white shadow-xl shadow-hcdc-blue/20 translate-x-1'
                       : 'hover:bg-hcdc-light-blue text-gray-500 hover:text-hcdc-blue'
                     }`}
                 >
-                  {currentCategory === cat.name && (
+                  {currentCategory === cat && (
                     <motion.div layoutId="activeCat" className="absolute left-0 top-0 bottom-0 w-1.5 bg-hcdc-red" />
                   )}
-                  <span className="text-2xl group-hover:scale-110 transition-transform duration-300">{cat.icon}</span>
-                  <span className="text-sm font-bold tracking-tight">{cat.name}</span>
+                  <span className="text-sm font-bold tracking-tight">{cat}</span>
                 </button>
               ))}
             </nav>

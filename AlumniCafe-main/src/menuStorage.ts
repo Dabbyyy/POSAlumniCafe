@@ -45,9 +45,43 @@ const DEFAULT_PRODUCTS: MenuItem[] = [
   { id: 30, name: 'Buko Pandan', price: 85, category: 'Desserts', icon: '🍧' },
 ];
 
-export const MENU_CATEGORIES = [
+const CATEGORY_STORAGE_KEY = 'alumnicafe_categories';
+
+const DEFAULT_CATEGORIES = [
   'Coffee', 'Non-Coffee', 'Food', 'Pastry & Snacks', 'Desserts'
 ];
+
+export function getMenuCategories(): string[] {
+  try {
+    const raw = localStorage.getItem(CATEGORY_STORAGE_KEY);
+    if (!raw) return [...DEFAULT_CATEGORIES];
+    return JSON.parse(raw) as string[];
+  } catch {
+    return [...DEFAULT_CATEGORIES];
+  }
+}
+
+export function saveMenuCategories(cats: string[]): void {
+  localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(cats));
+}
+
+export function addMenuCategory(cat: string): string[] {
+  const cats = getMenuCategories();
+  if (!cats.includes(cat)) {
+    cats.push(cat);
+    saveMenuCategories(cats);
+  }
+  return cats;
+}
+
+export function deleteMenuCategory(cat: string): string[] {
+  const cats = getMenuCategories().filter(c => c !== cat);
+  saveMenuCategories(cats);
+  
+  // Also clean up items in that category? 
+  // For now let's just delete the category name from the list.
+  return cats;
+}
 
 export function getMenuItems(): MenuItem[] {
   try {

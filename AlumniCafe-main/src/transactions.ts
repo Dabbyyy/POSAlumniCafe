@@ -47,3 +47,18 @@ export function getTodayTransactions(): TransactionRecord[] {
   const today = new Date().toISOString().slice(0, 10);
   return getTransactionsForDate(today);
 }
+
+export function updateCashierNames(oldName: string, newName: string): void {
+  const txns = getTransactions();
+  let changed = false;
+  const updated = txns.map(t => {
+    if (t.cashier === oldName) {
+      changed = true;
+      return { ...t, cashier: newName };
+    }
+    return t;
+  });
+  if (changed) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  }
+}

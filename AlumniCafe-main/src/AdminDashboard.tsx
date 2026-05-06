@@ -24,7 +24,8 @@ import {
   BanknoteArrowUp,
   CheckCircle2,
   Printer,
-  Receipt
+  Receipt,
+  Tag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -36,7 +37,7 @@ import {
   AreaChart,
   Area
 } from 'recharts';
-import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, MENU_CATEGORIES } from './menuStorage';
+import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, getMenuCategories, addMenuCategory, deleteMenuCategory } from './menuStorage';
 import { getTransactions, TransactionRecord } from './transactions';
 import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount } from './cashierStorage';
 
@@ -48,11 +49,14 @@ export default function AdminDashboard() {
 
   // Menu management state
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
   const [menuCategoryFilter, setMenuCategoryFilter] = useState('All');
   const [formData, setFormData] = useState({ name: '', price: '', category: 'Coffee', icon: '☕', image: '' });
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
 
   // Transaction state
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
@@ -75,11 +79,13 @@ export default function AdminDashboard() {
     setMenuItems(getMenuItems());
     setTransactions(getTransactions());
     setCashiers(getCashiers());
+    setCategories(getMenuCategories());
     const timer = setInterval(() => setTime(new Date()), 1000);
     const refresh = setInterval(() => {
       setMenuItems(getMenuItems());
       setTransactions(getTransactions());
       setCashiers(getCashiers());
+      setCategories(getMenuCategories());
     }, 2000);
     return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
@@ -131,6 +137,19 @@ export default function AdminDashboard() {
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
     setFormData({ name: item.name, price: item.price.toString(), category: item.category, icon: item.icon, image: item.image || '' });
+  };
+
+  const handleAddCat = () => {
+    if (!newCategoryName.trim()) return;
+    setCategories(addMenuCategory(newCategoryName.trim()));
+    setNewCategoryName('');
+  };
+
+  const handleDeleteCat = (cat: string) => {
+    if (confirm(`Are you sure you want to delete the "${cat}" category?`)) {
+      setCategories(deleteMenuCategory(cat));
+      if (menuCategoryFilter === cat) setMenuCategoryFilter('All');
+    }
   };
 
   const handleSaveCashier = () => {
@@ -578,7 +597,6 @@ export default function AdminDashboard() {
                       <th className="p-6 font-black">Username</th>
                       <th className="p-6 font-black">Role</th>
                       <th className="p-6 font-black">Status</th>
-                      <th className="p-6 font-black">Last Login</th>
                       <th className="p-6 font-black text-right">Actions</th>
                     </tr>
                   </thead>
@@ -606,7 +624,7 @@ export default function AdminDashboard() {
                             {acc.status}
                           </span>
                         </td>
-                        <td className="p-6 text-sm text-gray-500 font-medium">{acc.lastLogin}</td>
+
                         <td className="p-6 text-right flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={() => openEditCashier(acc)} className="p-2 text-hcdc-blue bg-hcdc-light-blue hover:bg-hcdc-blue hover:text-white rounded-xl transition-all">
                             <Edit3 className="w-4 h-4" />
@@ -725,12 +743,12 @@ export default function AdminDashboard() {
                       className="bg-transparent border-none focus:ring-0 text-sm font-medium w-full"
                     />
                   </div>
-                  <div className="flex bg-white p-1 rounded-xl border border-gray-100 shadow-sm">
+                  <div className="flex bg-white p-1 rounded-xl border border-gray-100 shadow-sm overflow-x-auto max-w-full no-scrollbar">
                     <button
                       onClick={() => setMenuCategoryFilter('All')}
                       className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${menuCategoryFilter === 'All' ? 'bg-hcdc-blue text-white' : 'text-gray-400 hover:text-gray-700'}`}
                     >All</button>
-                    {MENU_CATEGORIES.map(cat => (
+                    {categories.map(cat => (
                       <button
                         key={cat}
                         onClick={() => setMenuCategoryFilter(cat)}
@@ -739,12 +757,20 @@ export default function AdminDashboard() {
                     ))}
                   </div>
                 </div>
-                <button
-                  onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '' }); }}
-                  className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md ml-4"
-                >
-                  <Plus className="w-4 h-4" /> Add Item
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowCategoryManager(true)}
+                    className="bg-hcdc-gold text-hcdc-blue px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-[#D4921C] transition-colors shadow-md"
+                  >
+                    <Tag className="w-4 h-4" /> Categories
+                  </button>
+                  <button
+                    onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: categories[0] || 'Coffee', icon: '☕', image: '' }); }}
+                    className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md"
+                  >
+                    <Plus className="w-4 h-4" /> Add Item
+                  </button>
+                </div>
               </div>
 
               {/* Menu Grid */}
@@ -794,7 +820,8 @@ export default function AdminDashboard() {
       </div>
 
       {/* ADD / EDIT MODAL */}
-      {(showAddModal || editingItem) && (
+      <AnimatePresence>
+        {(showAddModal || editingItem) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
             <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
@@ -851,8 +878,8 @@ export default function AdminDashboard() {
               </div>
               <div>
                 <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Category</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {MENU_CATEGORIES.map(cat => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {categories.map(cat => (
                     <button
                       key={cat}
                       onClick={() => setFormData({ ...formData, category: cat })}
@@ -882,6 +909,7 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+      </AnimatePresence>
 
       {/* RECEIPT MODAL */}
       <AnimatePresence>
@@ -978,7 +1006,8 @@ export default function AdminDashboard() {
       </AnimatePresence>
 
       {/* CASHIER ADD/EDIT MODAL */}
-      {(showCashierModal) && (
+      <AnimatePresence>
+        {(showCashierModal) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
             <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
@@ -1061,6 +1090,63 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+      </AnimatePresence>
+
+      {/* CATEGORY MANAGER MODAL */}
+      <AnimatePresence>
+        {showCategoryManager && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="bg-hcdc-gold p-6 text-hcdc-blue flex justify-between items-center">
+                <h3 className="font-bold flex items-center gap-2"><Tag className="w-5 h-5" /> Manage Categories</h3>
+                <button onClick={() => setShowCategoryManager(false)} className="w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 flex items-center justify-center transition-colors"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="p-8">
+                <div className="flex gap-2 mb-6">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="New category name..."
+                    className="flex-1 h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-xl font-bold text-sm transition-all outline-none"
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddCat()}
+                  />
+                  <button
+                    onClick={handleAddCat}
+                    disabled={!newCategoryName.trim()}
+                    className="bg-hcdc-blue text-white px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-hcdc-blue-dark transition-all disabled:opacity-30 shadow-md shadow-hcdc-blue/20"
+                  >
+                    Add
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                  {categories.map(cat => (
+                    <div key={cat} className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl group border border-transparent hover:border-gray-200 transition-all">
+                      <span className="font-bold text-gray-700">{cat}</span>
+                      <button
+                        onClick={() => handleDeleteCat(cat)}
+                        className="p-2 text-gray-300 hover:text-hcdc-red transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {categories.length === 0 && (
+                    <p className="text-center text-gray-400 text-sm py-4">No categories created yet.</p>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Global Confirmation Modal */}
       <AnimatePresence>
         {showDeleteConfirm && itemToDelete && (
