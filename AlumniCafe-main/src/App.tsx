@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { saveTransaction, updateCashierNames } from './transactions';
 import { getMenuItems, MenuItem, addMenuItem, deleteMenuItem, getMenuCategories } from './menuStorage';
 import { getCashiers, addCashier, deleteCashier, CashierAccount } from './cashierStorage';
-import { getInventory, Inventory } from './inventoryStorage';
+import { getInventory, saveInventory, Inventory } from './inventoryStorage';
 import {
   Coffee,
   ChevronRight,
@@ -277,6 +277,14 @@ export default function App() {
       cashTendered: cash,
       change: Math.max(0, cash - total),
     });
+
+    // Deduct inventory
+    const newInventory = {
+      coffeeBeansGrams: inventory.coffeeBeansGrams - usedInventory.coffee,
+      milkAmount: inventory.milkAmount - usedInventory.milk,
+    };
+    saveInventory(newInventory);
+    setInventory(newInventory);
 
     setShowReceipt(true);
     setShowPaymentModal(false);
