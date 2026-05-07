@@ -41,7 +41,7 @@ import {
 import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, getMenuCategories, addMenuCategory, deleteMenuCategory } from './menuStorage';
 import { getTransactions, TransactionRecord } from './transactions';
 import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount } from './cashierStorage';
-import { getInventory, saveInventory, Inventory } from './inventoryStorage';
+import { getInventory, saveInventory, Inventory, getInventoryLogs, addInventoryLog, InventoryLog } from './inventoryStorage';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu' | 'inventory'>('analytics');
@@ -78,6 +78,7 @@ export default function AdminDashboard() {
 
   // Inventory state
   const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
+  const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
   const [addInventoryForm, setAddInventoryForm] = useState({ coffeeGrams: '', milkAmount: '' });
 
   useEffect(() => {
@@ -86,6 +87,7 @@ export default function AdminDashboard() {
     setCashiers(getCashiers());
     setCategories(getMenuCategories());
     setInventory(getInventory());
+    setInventoryLogs(getInventoryLogs());
     const timer = setInterval(() => setTime(new Date()), 1000);
     const refresh = setInterval(() => {
       setMenuItems(getMenuItems());
@@ -93,14 +95,29 @@ export default function AdminDashboard() {
       setCashiers(getCashiers());
       setCategories(getMenuCategories());
       setInventory(getInventory());
+      setInventoryLogs(getInventoryLogs());
     }, 2000);
     return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
 
   // Menu handlers
   const handleAddInventory = () => {
-    const newGrams = inventory.coffeeBeansGrams + (parseFloat(addInventoryForm.coffeeGrams) || 0);
-    const newMilk = inventory.milkAmount + (parseFloat(addInventoryForm.milkAmount) || 0);
+    const addedCoffee = parseFloat(addInventoryForm.coffeeGrams) || 0;
+    const addedMilk = parseFloat(addInventoryForm.milkAmount) || 0;
+    
+    if (addedCoffee > 0 || addedMilk > 0) {
+      const now = new Date();
+      const newLogs = addInventoryLog({
+        date: now.toISOString(),
+        time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        addedCoffeeGrams: addedCoffee,
+        addedMilkAmount: addedMilk
+      });
+      setInventoryLogs(newLogs);
+    }
+
+    const newGrams = inventory.coffeeBeansGrams + addedCoffee;
+    const newMilk = inventory.milkAmount + addedMilk;
     const updated = { coffeeBeansGrams: newGrams, milkAmount: newMilk };
     saveInventory(updated);
     setInventory(updated);
@@ -119,11 +136,11 @@ export default function AdminDashboard() {
 
   const handleAddItem = () => {
     if (!formData.name || !formData.price) return;
-    const updated = addMenuItem({ 
-      name: formData.name, 
-      price: parseFloat(formData.price), 
-      category: formData.category, 
-      icon: formData.icon, 
+    const updated = addMenuItem({
+      name: formData.name,
+      price: parseFloat(formData.price),
+      category: formData.category,
+      icon: formData.icon,
       image: formData.image || undefined,
       coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
       milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
@@ -135,11 +152,11 @@ export default function AdminDashboard() {
 
   const handleEditItem = () => {
     if (!editingItem || !formData.name || !formData.price) return;
-    const updated = updateMenuItem(editingItem.id, { 
-      name: formData.name, 
-      price: parseFloat(formData.price), 
-      category: formData.category, 
-      icon: formData.icon, 
+    const updated = updateMenuItem(editingItem.id, {
+      name: formData.name,
+      price: parseFloat(formData.price),
+      category: formData.category,
+      icon: formData.icon,
       image: formData.image || undefined,
       coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
       milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
@@ -168,11 +185,11 @@ export default function AdminDashboard() {
 
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
-    setFormData({ 
-      name: item.name, 
-      price: item.price.toString(), 
-      category: item.category, 
-      icon: item.icon, 
+    setFormData({
+      name: item.name,
+      price: item.price.toString(),
+      category: item.category,
+      icon: item.icon,
       image: item.image || '',
       coffeeGrams: item.coffeeGrams ? item.coffeeGrams.toString() : '',
       milkAmount: item.milkAmount ? item.milkAmount.toString() : ''
@@ -207,11 +224,11 @@ export default function AdminDashboard() {
 
   const openEditCashier = (acc: CashierAccount) => {
     setEditingCashier(acc);
-    setCashierForm({ 
-      name: acc.name, 
-      usernamePrefix: acc.username.split('@')[0], 
-      role: acc.role, 
-      status: acc.status 
+    setCashierForm({
+      name: acc.name,
+      usernamePrefix: acc.username.split('@')[0],
+      role: acc.role,
+      status: acc.status
     });
     setShowCashierModal(true);
   };
@@ -224,15 +241,15 @@ export default function AdminDashboard() {
   const exportCSV = () => {
     const headers = ['Transaction ID', 'Date', 'Time', 'Cashier', 'Subtotal', 'VAT', 'Discount', 'Total', 'Cash', 'Change'];
     const rows = sortedTransactions.map(t => [
-      t.id, 
-      t.date.split('T')[0], 
-      t.time, 
-      t.cashier, 
-      t.subtotal, 
-      t.vatAmount, 
-      t.discountAmount, 
-      t.total, 
-      t.cashTendered, 
+      t.id,
+      t.date.split('T')[0],
+      t.time,
+      t.cashier,
+      t.subtotal,
+      t.vatAmount,
+      t.discountAmount,
+      t.total,
+      t.cashTendered,
       t.change
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -240,6 +257,33 @@ export default function AdminDashboard() {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `alumnicafe_sales_${reportDateFilter || 'all'}.csv`;
+    link.click();
+  };
+
+  const exportInventoryCSV = () => {
+    const headers = ['Log ID', 'Date', 'Time', 'Added Coffee (g)', 'Added Milk (ml)', 'Estimated Servings'];
+    const rows = [...inventoryLogs].sort((a, b) => b.id - a.id).map(log => {
+      const coffeeServings = Math.floor(log.addedCoffeeGrams / 18);
+      const milkServings = Math.floor(log.addedMilkAmount / 150);
+      const servingsText = [
+        coffeeServings > 0 ? `${coffeeServings} coffee` : '',
+        milkServings > 0 ? `${milkServings} milk` : ''
+      ].filter(Boolean).join(' & ') || '0';
+      
+      return [
+        log.id,
+        log.date.split('T')[0],
+        log.time,
+        log.addedCoffeeGrams,
+        log.addedMilkAmount,
+        servingsText
+      ];
+    });
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `alumnicafe_inventory_log.csv`;
     link.click();
   };
 
@@ -274,7 +318,7 @@ export default function AdminDashboard() {
   const totalSalesPeriod = filteredTransactions.reduce((sum, t) => sum + t.total, 0);
   const totalOrdersPeriod = filteredTransactions.length;
   const avgOrderValue = totalOrdersPeriod > 0 ? totalSalesPeriod / totalOrdersPeriod : 0;
-  
+
   // Calculate Revenue Trends
   const trendData = useMemo(() => {
     if (analyticsPeriod === 'daily') {
@@ -289,7 +333,7 @@ export default function AdminDashboard() {
         let hour = parseInt(hourStr, 10);
         if (isPM && hour !== 12) hour += 12;
         if (!isPM && hour === 12) hour = 0;
-        
+
         const bucketIndex = hour - 7;
         if (bucketIndex >= 0 && bucketIndex < hourBuckets.length) {
           hourBuckets[bucketIndex].sales += t.total;
@@ -328,7 +372,7 @@ export default function AdminDashboard() {
   const categoryData = useMemo(() => {
     const categoryTotals: Record<string, number> = {};
     let grandTotal = 0;
-    
+
     filteredTransactions.forEach(txn => {
       txn.items.forEach(item => {
         const itemTotal = item.price * item.quantity;
@@ -347,7 +391,7 @@ export default function AdminDashboard() {
   // Calculate Product Ranking
   const productRanking = useMemo(() => {
     const counts: Record<string, { quantity: number; revenue: number; category: string }> = {};
-    
+
     filteredTransactions.forEach(txn => {
       txn.items.forEach(item => {
         if (!counts[item.name]) {
@@ -362,14 +406,14 @@ export default function AdminDashboard() {
       .map(([name, stats]) => ({ name, ...stats }))
       .sort((a, b) => b.quantity - a.quantity);
   }, [filteredTransactions]);
-  
+
   // Sort and filter transactions for the reports table
   let filteredReports = transactions;
   if (reportDateFilter) {
     filteredReports = filteredReports.filter(t => t.date.startsWith(reportDateFilter));
   }
   const sortedTransactions = [...filteredReports].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  
+
   const activeCashiersCount = cashiers.filter(c => c.status === 'Active').length;
 
   return (
@@ -691,7 +735,7 @@ export default function AdminDashboard() {
                       className="bg-white border-2 border-gray-100 text-gray-600 pl-10 pr-4 py-2 rounded-xl font-bold text-sm focus:border-hcdc-blue focus:ring-0 transition-colors shadow-sm outline-none"
                     />
                     {reportDateFilter && (
-                      <button 
+                      <button
                         onClick={() => setReportDateFilter('')}
                         className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-hcdc-red"
                       >
@@ -699,7 +743,7 @@ export default function AdminDashboard() {
                       </button>
                     )}
                   </div>
-                  <button 
+                  <button
                     onClick={exportCSV}
                     disabled={sortedTransactions.length === 0}
                     className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
@@ -859,7 +903,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
                       <span className="font-bold text-gray-600">Milk</span>
-                      <span className="text-2xl font-black text-hcdc-blue">{inventory.milkAmount.toLocaleString()} ml/pumps</span>
+                      <span className="text-2xl font-black text-hcdc-blue">{inventory.milkAmount.toLocaleString()} ml</span>
                     </div>
                   </div>
                 </div>
@@ -878,7 +922,7 @@ export default function AdminDashboard() {
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Milk (ml/pumps)</label>
+                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Milk (ml)</label>
                       <input
                         type="number"
                         value={addInventoryForm.milkAmount}
@@ -916,14 +960,14 @@ export default function AdminDashboard() {
                       {menuItems.filter(item => item.coffeeGrams || item.milkAmount).map(item => {
                         let coffeeServings = Infinity;
                         let milkServings = Infinity;
-                        
+
                         if (item.coffeeGrams && item.coffeeGrams > 0) {
                           coffeeServings = Math.floor(inventory.coffeeBeansGrams / item.coffeeGrams);
                         }
                         if (item.milkAmount && item.milkAmount > 0) {
                           milkServings = Math.floor(inventory.milkAmount / item.milkAmount);
                         }
-                        
+
                         const minServings = Math.min(coffeeServings, milkServings);
                         const isLow = minServings < 10;
                         const isOut = minServings === 0;
@@ -950,6 +994,60 @@ export default function AdminDashboard() {
                   </table>
                 </div>
               </div>
+              
+              <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden mt-8">
+                <div className="p-8 border-b border-gray-50 flex justify-between items-center">
+                  <div>
+                    <h3 className="text-xl font-black text-gray-800">Inventory Logs</h3>
+                    <p className="text-xs text-gray-500 font-medium mt-1">History of added stock.</p>
+                  </div>
+                  <button
+                    onClick={exportInventoryCSV}
+                    disabled={inventoryLogs.length === 0}
+                    className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" /> Export CSV
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400 font-black">
+                        <th className="p-6">Date</th>
+                        <th className="p-6">Time</th>
+                        <th className="p-6">Added Coffee (g)</th>
+                        <th className="p-6">Added Milk (ml)</th>
+                        <th className="p-6 text-right">Estimated Servings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {[...inventoryLogs].sort((a, b) => b.id - a.id).map(log => {
+                        const coffeeServings = Math.floor(log.addedCoffeeGrams / 18);
+                        const milkServings = Math.floor(log.addedMilkAmount / 150);
+                        const servingsText = [
+                          coffeeServings > 0 ? `${coffeeServings} coffee` : '',
+                          milkServings > 0 ? `${milkServings} milk` : ''
+                        ].filter(Boolean).join(' & ') || '-';
+                        
+                        return (
+                          <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                            <td className="p-6 font-bold text-gray-800">{log.date.split('T')[0]}</td>
+                            <td className="p-6 font-mono text-sm text-gray-500">{log.time}</td>
+                            <td className="p-6 font-mono text-sm text-green-600 font-bold">+{log.addedCoffeeGrams}</td>
+                            <td className="p-6 font-mono text-sm text-green-600 font-bold">+{log.addedMilkAmount}</td>
+                            <td className="p-6 text-right font-mono text-sm text-gray-500">{servingsText}</td>
+                          </tr>
+                        );
+                      })}
+                      {inventoryLogs.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">No inventory logs found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
@@ -959,122 +1057,122 @@ export default function AdminDashboard() {
       {/* ADD / EDIT MODAL */}
       <AnimatePresence>
         {(showAddModal || editingItem) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
-            <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
-              <div>
-                <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">{editingItem ? 'Edit Item' : 'New Menu Item'}</h3>
-                <p className="text-2xl font-black tracking-tight">{editingItem ? formData.name || 'Editing...' : 'Add to Menu'}</p>
-              </div>
-              <button onClick={() => { setShowAddModal(false); setEditingItem(null); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-10 space-y-6">
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Item Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. Vanilla Latte"
-                  className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Price (₱)</label>
-                <input
-                  type="number"
-                  value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Item Image (PNG)</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
-                    {formData.image ? (
-                      <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImagePlus className="w-6 h-6 text-gray-300" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <label className="flex items-center gap-3 px-5 py-3 bg-gray-50 hover:bg-hcdc-light-blue border-2 border-gray-100 hover:border-hcdc-blue/20 rounded-2xl cursor-pointer transition-all">
-                      <ImagePlus className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm font-bold text-gray-500">{formData.image ? 'Change Image' : 'Upload PNG'}</span>
-                      <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleImageUpload} className="hidden" />
-                    </label>
-                    {formData.image && (
-                      <button onClick={() => setFormData(prev => ({ ...prev, image: '' }))} className="text-[10px] font-bold text-hcdc-red mt-2 hover:underline">Remove image</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
+              <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
                 <div>
-                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Coffee Beans (g)</label>
+                  <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">{editingItem ? 'Edit Item' : 'New Menu Item'}</h3>
+                  <p className="text-2xl font-black tracking-tight">{editingItem ? formData.name || 'Editing...' : 'Add to Menu'}</p>
+                </div>
+                <button onClick={() => { setShowAddModal(false); setEditingItem(null); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-10 space-y-6">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Item Name</label>
                   <input
-                    type="number"
-                    value={formData.coffeeGrams}
-                    onChange={(e) => setFormData({ ...formData, coffeeGrams: e.target.value })}
-                    placeholder="e.g. 18"
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Vanilla Latte"
                     className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Milk (ml/pumps)</label>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Price (₱)</label>
                   <input
                     type="number"
-                    value={formData.milkAmount}
-                    onChange={(e) => setFormData({ ...formData, milkAmount: e.target.value })}
-                    placeholder="e.g. 150"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    placeholder="0.00"
                     className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
                   />
                 </div>
-              </div>
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Category</label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {categories.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setFormData({ ...formData, category: cat })}
-                      className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${formData.category === cat ? 'bg-hcdc-blue border-hcdc-blue text-white shadow-lg' : 'bg-white border-gray-100 text-gray-400 hover:border-gray-200'}`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Item Image (PNG)</label>
+                  <div className="flex items-center gap-4">
+                    <div className="w-20 h-20 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                      {formData.image ? (
+                        <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImagePlus className="w-6 h-6 text-gray-300" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <label className="flex items-center gap-3 px-5 py-3 bg-gray-50 hover:bg-hcdc-light-blue border-2 border-gray-100 hover:border-hcdc-blue/20 rounded-2xl cursor-pointer transition-all">
+                        <ImagePlus className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm font-bold text-gray-500">{formData.image ? 'Change Image' : 'Upload PNG'}</span>
+                        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleImageUpload} className="hidden" />
+                      </label>
+                      {formData.image && (
+                        <button onClick={() => setFormData(prev => ({ ...prev, image: '' }))} className="text-[10px] font-bold text-hcdc-red mt-2 hover:underline">Remove image</button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="flex gap-4 pt-2">
-                <button
-                  onClick={() => { setShowAddModal(false); setEditingItem(null); }}
-                  className="flex-1 h-14 bg-white border-2 border-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-50 transition-all uppercase tracking-widest text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={editingItem ? handleEditItem : handleAddItem}
-                  disabled={!formData.name || !formData.price}
-                  className="flex-[2] h-14 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-2xl shadow-xl shadow-hcdc-blue/30 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-30 disabled:scale-100 text-sm uppercase tracking-wider"
-                >
-                  <Save className="w-4 h-4" /> {editingItem ? 'Save Changes' : 'Add Item'}
-                </button>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Coffee Beans (g)</label>
+                    <input
+                      type="number"
+                      value={formData.coffeeGrams}
+                      onChange={(e) => setFormData({ ...formData, coffeeGrams: e.target.value })}
+                      placeholder="e.g. 18"
+                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Milk (ml/pumps)</label>
+                    <input
+                      type="number"
+                      value={formData.milkAmount}
+                      onChange={(e) => setFormData({ ...formData, milkAmount: e.target.value })}
+                      placeholder="e.g. 150"
+                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Category</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {categories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setFormData({ ...formData, category: cat })}
+                        className={`py-3 rounded-xl text-xs font-black border-2 transition-all ${formData.category === cat ? 'bg-hcdc-blue border-hcdc-blue text-white shadow-lg' : 'bg-white border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-4 pt-2">
+                  <button
+                    onClick={() => { setShowAddModal(false); setEditingItem(null); }}
+                    className="flex-1 h-14 bg-white border-2 border-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-50 transition-all uppercase tracking-widest text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={editingItem ? handleEditItem : handleAddItem}
+                    disabled={!formData.name || !formData.price}
+                    className="flex-[2] h-14 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-2xl shadow-xl shadow-hcdc-blue/30 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-30 disabled:scale-100 text-sm uppercase tracking-wider"
+                  >
+                    <Save className="w-4 h-4" /> {editingItem ? 'Save Changes' : 'Add Item'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </AnimatePresence>
 
       {/* RECEIPT MODAL */}
       <AnimatePresence>
         {viewingReceipt && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm print:bg-transparent print:backdrop-blur-none">
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -1088,71 +1186,71 @@ export default function AdminDashboard() {
               <div className="flex-1 overflow-y-auto p-8 bg-[#F9FAFB] scroll-smooth custom-scrollbar">
                 {/* Simulated Thermal Receipt */}
                 <div id="receipt-content" className="bg-white p-6 shadow-md mx-auto max-w-[320px] font-mono text-[11px] text-gray-800 border-t-8 border-hcdc-blue relative">
-                   {/* Background watermark */}
-                   <div className="absolute inset-0 opacity-[0.02] flex items-center justify-center pointer-events-none">
-                     <UtensilsCrossed className="w-48 h-48" />
-                   </div>
+                  {/* Background watermark */}
+                  <div className="absolute inset-0 opacity-[0.02] flex items-center justify-center pointer-events-none">
+                    <UtensilsCrossed className="w-48 h-48" />
+                  </div>
 
-                   <div className="text-center space-y-0.5 mb-6 relative">
-                      <p className="text-base font-black uppercase tracking-tight">AlumniCafe</p>
-                      <p>Holy Cross of Davao College</p>
-                      <p>Sta. Ana Ave., Davao City</p>
-                      <p>VAT Reg TIN: 000-000-0000</p>
-                      <p>Tel: (082) 000-0000</p>
-                   </div>
-                   
-                   <div className="border-t border-dashed border-gray-400 py-3 space-y-0.5 relative">
-                      <div className="flex justify-between"><span>Date:</span> <span>{viewingReceipt.date.split('T')[0]}</span></div>
-                      <div className="flex justify-between"><span>Time:</span> <span>{viewingReceipt.time}</span></div>
-                      <div className="flex justify-between"><span>TXN#:</span> <span>{viewingReceipt.id}</span></div>
-                      <div className="flex justify-between"><span>Cashier:</span> <span>{viewingReceipt.cashier}</span></div>
-                   </div>
+                  <div className="text-center space-y-0.5 mb-6 relative">
+                    <p className="text-base font-black uppercase tracking-tight">AlumniCafe</p>
+                    <p>Holy Cross of Davao College</p>
+                    <p>Sta. Ana Ave., Davao City</p>
+                    <p>VAT Reg TIN: 000-000-0000</p>
+                    <p>Tel: (082) 000-0000</p>
+                  </div>
 
-                   <div className="border-t border-gray-400 pt-3 mb-1 font-bold text-[10px] relative">
-                      <div className="flex justify-between gap-4">
-                        <span className="flex-1">ITEM</span>
-                        <span className="w-8 text-center">QTY</span>
-                        <span className="w-20 text-right">AMOUNT</span>
+                  <div className="border-t border-dashed border-gray-400 py-3 space-y-0.5 relative">
+                    <div className="flex justify-between"><span>Date:</span> <span>{viewingReceipt.date.split('T')[0]}</span></div>
+                    <div className="flex justify-between"><span>Time:</span> <span>{viewingReceipt.time}</span></div>
+                    <div className="flex justify-between"><span>TXN#:</span> <span>{viewingReceipt.id}</span></div>
+                    <div className="flex justify-between"><span>Cashier:</span> <span>{viewingReceipt.cashier}</span></div>
+                  </div>
+
+                  <div className="border-t border-gray-400 pt-3 mb-1 font-bold text-[10px] relative">
+                    <div className="flex justify-between gap-4">
+                      <span className="flex-1">ITEM</span>
+                      <span className="w-8 text-center">QTY</span>
+                      <span className="w-20 text-right">AMOUNT</span>
+                    </div>
+                  </div>
+                  <div className="border-b border-gray-400 pb-2 mb-3 relative">
+                    {viewingReceipt.items.map((item, idx) => (
+                      <div key={idx} className="flex justify-between gap-4 py-1 leading-tight">
+                        <span className="flex-1 truncate">{item.name}</span>
+                        <span className="w-8 text-center">{item.quantity}</span>
+                        <span className="w-20 text-right">{(item.price * item.quantity).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
-                   </div>
-                   <div className="border-b border-gray-400 pb-2 mb-3 relative">
-                      {viewingReceipt.items.map((item, idx) => (
-                        <div key={idx} className="flex justify-between gap-4 py-1 leading-tight">
-                           <span className="flex-1 truncate">{item.name}</span>
-                           <span className="w-8 text-center">{item.quantity}</span>
-                           <span className="w-20 text-right">{(item.price * item.quantity).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      ))}
-                   </div>
+                    ))}
+                  </div>
 
-                   <div className="space-y-1 mb-4 relative">
-                      <div className="flex justify-between"><span>Subtotal:</span> <span>{viewingReceipt.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      {viewingReceipt.discountType !== 'REGULAR' && (
-                        <div className="flex justify-between italic text-red-600">
-                           <span>{viewingReceipt.discountType} Disc ({(viewingReceipt.discountRate * 100).toFixed(0)}%):</span> 
-                           <span>-{viewingReceipt.discountAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between"><span>VATable Amt:</span> <span>{(viewingReceipt.total - viewingReceipt.vatAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between"><span>VAT (12%):</span> <span>{viewingReceipt.vatAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between font-bold text-lg pt-2 border-t border-double border-gray-800 mt-2">
-                         <span>TOTAL:</span> 
-                         <span>{viewingReceipt.total.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="space-y-1 mb-4 relative">
+                    <div className="flex justify-between"><span>Subtotal:</span> <span>{viewingReceipt.subtotal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    {viewingReceipt.discountType !== 'REGULAR' && (
+                      <div className="flex justify-between italic text-red-600">
+                        <span>{viewingReceipt.discountType} Disc ({(viewingReceipt.discountRate * 100).toFixed(0)}%):</span>
+                        <span>-{viewingReceipt.discountAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
-                      <div className="flex justify-between pt-2 text-gray-500"><span>Cash:</span> <span>{viewingReceipt.cashTendered.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                      <div className="flex justify-between text-gray-500"><span>Change:</span> <span>{viewingReceipt.change.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-                   </div>
+                    )}
+                    <div className="flex justify-between"><span>VATable Amt:</span> <span>{(viewingReceipt.total - viewingReceipt.vatAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between"><span>VAT (12%):</span> <span>{viewingReceipt.vatAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between font-bold text-lg pt-2 border-t border-double border-gray-800 mt-2">
+                      <span>TOTAL:</span>
+                      <span>{viewingReceipt.total.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between pt-2 text-gray-500"><span>Cash:</span> <span>{viewingReceipt.cashTendered.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                    <div className="flex justify-between text-gray-500"><span>Change:</span> <span>{viewingReceipt.change.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+                  </div>
 
-                   <div className="text-center space-y-1 mt-6 border-t border-dashed border-gray-400 pt-4 relative">
-                      <p className="font-bold">THANK YOU FOR YOUR PURCHASE</p>
-                      <p>Please come again!</p>
-                      <p className="mt-2 text-[9px] text-gray-400">THIS SERVES AS AN OFFICIAL RECEIPT</p>
-                   </div>
+                  <div className="text-center space-y-1 mt-6 border-t border-dashed border-gray-400 pt-4 relative">
+                    <p className="font-bold">THANK YOU FOR YOUR PURCHASE</p>
+                    <p>Please come again!</p>
+                    <p className="mt-2 text-[9px] text-gray-400">THIS SERVES AS AN OFFICIAL RECEIPT</p>
+                  </div>
                 </div>
               </div>
-              
+
               <div className="p-6 border-t border-gray-100 shrink-0 bg-white">
-                <button 
+                <button
                   onClick={() => window.print()}
                   className="w-full bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all"
                 >
@@ -1167,88 +1265,88 @@ export default function AdminDashboard() {
       {/* CASHIER ADD/EDIT MODAL */}
       <AnimatePresence>
         {(showCashierModal) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
-            <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
-              <div>
-                <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">{editingCashier ? 'Edit Cashier' : 'New Cashier'}</h3>
-                <p className="text-2xl font-black tracking-tight">{editingCashier ? cashierForm.name || 'Editing...' : 'Add Account'}</p>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-gray-100">
+              <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">{editingCashier ? 'Edit Cashier' : 'New Cashier'}</h3>
+                  <p className="text-2xl font-black tracking-tight">{editingCashier ? cashierForm.name || 'Editing...' : 'Add Account'}</p>
+                </div>
+                <button onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-10 space-y-6">
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Full Name</label>
-                <input
-                  type="text"
-                  value={cashierForm.name}
-                  onChange={(e) => setCashierForm({ ...cashierForm, name: e.target.value })}
-                  placeholder="e.g. Juan Dela Cruz"
-                  className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Username</label>
-                <div className="flex bg-gray-50 rounded-2xl overflow-hidden border-2 border-transparent focus-within:border-hcdc-blue focus-within:bg-white transition-all h-14">
+              <div className="p-10 space-y-6">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Full Name</label>
                   <input
                     type="text"
-                    value={cashierForm.usernamePrefix}
-                    onChange={(e) => setCashierForm({ ...cashierForm, usernamePrefix: e.target.value })}
-                    placeholder="e.g. juan"
-                    className="flex-1 h-full px-6 bg-transparent border-none font-bold text-lg focus:ring-0 text-right"
+                    value={cashierForm.name}
+                    onChange={(e) => setCashierForm({ ...cashierForm, name: e.target.value })}
+                    placeholder="e.g. Juan Dela Cruz"
+                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
                   />
-                  <div className="flex items-center px-6 bg-gray-100 text-gray-500 font-bold text-lg select-none">
-                    @alumnicafe
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Username</label>
+                  <div className="flex bg-gray-50 rounded-2xl overflow-hidden border-2 border-transparent focus-within:border-hcdc-blue focus-within:bg-white transition-all h-14">
+                    <input
+                      type="text"
+                      value={cashierForm.usernamePrefix}
+                      onChange={(e) => setCashierForm({ ...cashierForm, usernamePrefix: e.target.value })}
+                      placeholder="e.g. juan"
+                      className="flex-1 h-full px-6 bg-transparent border-none font-bold text-lg focus:ring-0 text-right"
+                    />
+                    <div className="flex items-center px-6 bg-gray-100 text-gray-500 font-bold text-lg select-none">
+                      @alumnicafe
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Role</label>
-                  <select
-                    value={cashierForm.role}
-                    onChange={(e) => setCashierForm({ ...cashierForm, role: e.target.value })}
-                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-sm transition-all focus:ring-0"
-                  >
-                    <option value="Cashier">Cashier</option>
-                    <option value="Senior Cashier">Senior Cashier</option>
-                    <option value="Manager">Manager</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Role</label>
+                    <select
+                      value={cashierForm.role}
+                      onChange={(e) => setCashierForm({ ...cashierForm, role: e.target.value })}
+                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-sm transition-all focus:ring-0"
+                    >
+                      <option value="Cashier">Cashier</option>
+                      <option value="Senior Cashier">Senior Cashier</option>
+                      <option value="Manager">Manager</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Status</label>
+                    <select
+                      value={cashierForm.status}
+                      onChange={(e) => setCashierForm({ ...cashierForm, status: e.target.value })}
+                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-sm transition-all focus:ring-0"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Status</label>
-                  <select
-                    value={cashierForm.status}
-                    onChange={(e) => setCashierForm({ ...cashierForm, status: e.target.value })}
-                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-sm transition-all focus:ring-0"
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }}
+                    className="flex-1 h-14 bg-white border-2 border-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-50 transition-all uppercase tracking-widest text-xs"
                   >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveCashier}
+                    disabled={!cashierForm.name || !cashierForm.usernamePrefix}
+                    className="flex-[2] h-14 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-2xl shadow-xl shadow-hcdc-blue/30 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-30 disabled:scale-100 text-sm uppercase tracking-wider"
+                  >
+                    <Save className="w-4 h-4" /> {editingCashier ? 'Save Changes' : 'Create Account'}
+                  </button>
                 </div>
-              </div>
-              
-              <div className="flex gap-4 pt-4">
-                <button
-                  onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }}
-                  className="flex-1 h-14 bg-white border-2 border-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-50 transition-all uppercase tracking-widest text-xs"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveCashier}
-                  disabled={!cashierForm.name || !cashierForm.usernamePrefix}
-                  className="flex-[2] h-14 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-2xl shadow-xl shadow-hcdc-blue/30 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-30 disabled:scale-100 text-sm uppercase tracking-wider"
-                >
-                  <Save className="w-4 h-4" /> {editingCashier ? 'Save Changes' : 'Create Account'}
-                </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </AnimatePresence>
 
       {/* CATEGORY MANAGER MODAL */}

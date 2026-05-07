@@ -23,3 +23,31 @@ export function getInventory(): Inventory {
 export function saveInventory(inv: Inventory): void {
   localStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(inv));
 }
+
+const INVENTORY_LOG_KEY = 'alumnicafe_inventory_log';
+
+export interface InventoryLog {
+  id: number;
+  date: string;
+  time: string;
+  addedCoffeeGrams: number;
+  addedMilkAmount: number;
+}
+
+export function getInventoryLogs(): InventoryLog[] {
+  try {
+    const raw = localStorage.getItem(INVENTORY_LOG_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as InventoryLog[];
+  } catch {
+    return [];
+  }
+}
+
+export function addInventoryLog(log: Omit<InventoryLog, 'id'>): InventoryLog[] {
+  const logs = getInventoryLogs();
+  const newId = logs.length > 0 ? Math.max(...logs.map(l => l.id)) + 1 : 1;
+  logs.push({ ...log, id: newId });
+  localStorage.setItem(INVENTORY_LOG_KEY, JSON.stringify(logs));
+  return logs;
+}
