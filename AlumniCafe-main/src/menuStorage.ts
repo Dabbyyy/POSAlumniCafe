@@ -7,6 +7,8 @@ export interface MenuItem {
   category: string;
   icon: string;
   image?: string; // base64 data URL for uploaded PNG
+  coffeeGrams?: number; // Grams of coffee beans needed
+  milkAmount?: number; // Milk required (ml/pumps)
 }
 
 const MENU_STORAGE_KEY = 'alumnicafe_menu';

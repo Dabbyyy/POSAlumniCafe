@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { saveTransaction, updateCashierNames } from './transactions';
 import { getMenuItems, MenuItem, addMenuItem, deleteMenuItem, getMenuCategories } from './menuStorage';
 import { getCashiers, addCashier, deleteCashier, CashierAccount } from './cashierStorage';
+import { getInventory, Inventory } from './inventoryStorage';
 import {
   Coffee,
   ChevronRight,
@@ -33,6 +34,9 @@ interface Product {
   price: number;
   category: string;
   icon: string;
+  image?: string;
+  coffeeGrams?: number;
+  milkAmount?: number;
 }
 
 interface CartItem extends Product {
@@ -121,6 +125,7 @@ export default function App() {
   const [animations, setAnimations] = useState<{ id: number; key: number }[]>([]);
   const [products, setProducts] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
   
   const [newProduct, setNewProduct] = useState({ name: '', price: 0, category: 'Coffee', icon: '☕' });
 
@@ -128,11 +133,13 @@ export default function App() {
   useEffect(() => {
     setProducts(getMenuItems());
     setCategories(getMenuCategories());
+    setInventory(getInventory());
     const timer = setInterval(() => setTime(new Date()), 1000);
     // Refresh menu items periodically in case admin changes them
     const refresh = setInterval(() => {
       setProducts(getMenuItems());
       setCategories(getMenuCategories());
+      setInventory(getInventory());
     }, 2000);
     return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
@@ -174,7 +181,29 @@ export default function App() {
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   // --- Handlers ---
+  const usedInventory = useMemo(() => {
+    let coffee = 0;
+    let milk = 0;
+    cart.forEach(item => {
+      coffee += (item.coffeeGrams || 0) * item.quantity;
+      milk += (item.milkAmount || 0) * item.quantity;
+    });
+    return { coffee, milk };
+  }, [cart]);
+
+  const canAddProduct = (product: Product, deltaQty: number) => {
+    const reqCoffee = (product.coffeeGrams || 0) * deltaQty;
+    const reqMilk = (product.milkAmount || 0) * deltaQty;
+    if (usedInventory.coffee + reqCoffee > inventory.coffeeBeansGrams) return false;
+    if (usedInventory.milk + reqMilk > inventory.milkAmount) return false;
+    return true;
+  };
+
   const addToCart = (product: Product) => {
+    if (!canAddProduct(product, 1)) {
+      alert(`Cannot add ${product.name}, insufficient inventory!`);
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
@@ -191,6 +220,13 @@ export default function App() {
   };
 
   const updateQuantity = (id: number, delta: number) => {
+    if (delta > 0) {
+      const product = products.find(p => p.id === id) || cart.find(p => p.id === id);
+      if (product && !canAddProduct(product, delta)) {
+        alert(`Cannot add more, insufficient inventory!`);
+        return;
+      }
+    }
     setCart(prev => prev.map(item => {
       if (item.id === id) {
         const newQty = Math.max(0, item.quantity + delta);
@@ -395,20 +431,40 @@ export default function App() {
 
           <div className="flex-1 overflow-y-auto pr-4 -mr-4 custom-scrollbar">
             <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6 pb-12">
-              {filteredProducts.map((product) => (
+              {filteredProducts.map((product) => {
+                let coffeeServings = Infinity;
+                let milkServings = Infinity;
+                
+                if (product.coffeeGrams && product.coffeeGrams > 0) {
+                  coffeeServings = Math.floor((inventory.coffeeBeansGrams - usedInventory.coffee) / product.coffeeGrams);
+                }
+                if (product.milkAmount && product.milkAmount > 0) {
+                  milkServings = Math.floor((inventory.milkAmount - usedInventory.milk) / product.milkAmount);
+                }
+                
+                const minServings = Math.min(coffeeServings, milkServings);
+                const isOut = minServings <= 0;
+                const hasInventoryTracking = product.coffeeGrams || product.milkAmount;
+
+                return (
                 <motion.div
                   key={product.id}
-                  whileHover={{ y: -8, shadow: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)" }}
-                  whileTap={{ scale: 0.96 }}
-                  onClick={() => addToCart(product)}
-                  className="bg-white rounded-[2rem] p-7 border border-gray-50 shadow-sm hover:border-hcdc-blue/20 transition-all cursor-pointer group relative overflow-hidden"
+                  whileHover={{ y: isOut ? 0 : -8, shadow: isOut ? "none" : "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)" }}
+                  whileTap={{ scale: isOut ? 1 : 0.96 }}
+                  onClick={() => !isOut && addToCart(product)}
+                  className={`bg-white rounded-[2rem] p-7 border border-gray-50 shadow-sm transition-all group relative overflow-hidden ${isOut ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-hcdc-blue/20 cursor-pointer'}`}
                 >
                   <div className="flex flex-col items-center text-center gap-4">
-                    <div className="w-20 h-20 rounded-3xl bg-hcdc-light-blue flex items-center justify-center group-hover:bg-white group-hover:scale-110 transition-all duration-300 shadow-inner group-hover:shadow-lg overflow-hidden">
+                    <div className="w-20 h-20 rounded-3xl bg-hcdc-light-blue flex items-center justify-center group-hover:bg-white group-hover:scale-110 transition-all duration-300 shadow-inner group-hover:shadow-lg overflow-hidden relative">
                       {product.image ? (
                         <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
                       ) : (
                         <span className="text-4xl">{product.icon}</span>
+                      )}
+                      {hasInventoryTracking && (
+                        <div className={`absolute bottom-0 inset-x-0 text-[9px] font-black uppercase tracking-widest py-0.5 z-10 ${isOut ? 'bg-red-500 text-white' : 'bg-hcdc-blue/90 text-white backdrop-blur-sm'}`}>
+                          {isOut ? 'Sold Out' : isFinite(minServings) ? `${minServings} left` : ''}
+                        </div>
                       )}
                     </div>
                     <div>
@@ -435,13 +491,16 @@ export default function App() {
                     ))}
                   </AnimatePresence>
 
-                  <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="w-8 h-8 rounded-full bg-hcdc-red text-white flex items-center justify-center">
-                      <Plus className="w-4 h-4" />
+                  {!isOut && (
+                    <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="w-8 h-8 rounded-full bg-hcdc-red text-white flex items-center justify-center">
+                        <Plus className="w-4 h-4" />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </motion.div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </section>

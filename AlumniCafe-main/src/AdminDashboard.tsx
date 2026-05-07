@@ -25,7 +25,8 @@ import {
   CheckCircle2,
   Printer,
   Receipt,
-  Tag
+  Tag,
+  Package
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -40,9 +41,10 @@ import {
 import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, getMenuCategories, addMenuCategory, deleteMenuCategory } from './menuStorage';
 import { getTransactions, TransactionRecord } from './transactions';
 import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount } from './cashierStorage';
+import { getInventory, saveInventory, Inventory } from './inventoryStorage';
 
 export default function AdminDashboard() {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu' | 'inventory'>('analytics');
   const [analyticsPeriod, setAnalyticsPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [time, setTime] = useState(new Date());
 
@@ -53,7 +55,7 @@ export default function AdminDashboard() {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
   const [menuCategoryFilter, setMenuCategoryFilter] = useState('All');
-  const [formData, setFormData] = useState({ name: '', price: '', category: 'Coffee', icon: '☕', image: '' });
+  const [formData, setFormData] = useState({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showCategoryManager, setShowCategoryManager] = useState(false);
 
@@ -74,22 +76,37 @@ export default function AdminDashboard() {
   // Report state
   const [reportDateFilter, setReportDateFilter] = useState('');
 
+  // Inventory state
+  const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
+  const [addInventoryForm, setAddInventoryForm] = useState({ coffeeGrams: '', milkAmount: '' });
+
   useEffect(() => {
     setMenuItems(getMenuItems());
     setTransactions(getTransactions());
     setCashiers(getCashiers());
     setCategories(getMenuCategories());
+    setInventory(getInventory());
     const timer = setInterval(() => setTime(new Date()), 1000);
     const refresh = setInterval(() => {
       setMenuItems(getMenuItems());
       setTransactions(getTransactions());
       setCashiers(getCashiers());
       setCategories(getMenuCategories());
+      setInventory(getInventory());
     }, 2000);
     return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
 
   // Menu handlers
+  const handleAddInventory = () => {
+    const newGrams = inventory.coffeeBeansGrams + (parseFloat(addInventoryForm.coffeeGrams) || 0);
+    const newMilk = inventory.milkAmount + (parseFloat(addInventoryForm.milkAmount) || 0);
+    const updated = { coffeeBeansGrams: newGrams, milkAmount: newMilk };
+    saveInventory(updated);
+    setInventory(updated);
+    setAddInventoryForm({ coffeeGrams: '', milkAmount: '' });
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -102,18 +119,34 @@ export default function AdminDashboard() {
 
   const handleAddItem = () => {
     if (!formData.name || !formData.price) return;
-    const updated = addMenuItem({ name: formData.name, price: parseFloat(formData.price), category: formData.category, icon: formData.icon, image: formData.image || undefined });
+    const updated = addMenuItem({ 
+      name: formData.name, 
+      price: parseFloat(formData.price), 
+      category: formData.category, 
+      icon: formData.icon, 
+      image: formData.image || undefined,
+      coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
+      milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
+    });
     setMenuItems(updated);
-    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '' });
+    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
     setShowAddModal(false);
   };
 
   const handleEditItem = () => {
     if (!editingItem || !formData.name || !formData.price) return;
-    const updated = updateMenuItem(editingItem.id, { name: formData.name, price: parseFloat(formData.price), category: formData.category, icon: formData.icon, image: formData.image || undefined });
+    const updated = updateMenuItem(editingItem.id, { 
+      name: formData.name, 
+      price: parseFloat(formData.price), 
+      category: formData.category, 
+      icon: formData.icon, 
+      image: formData.image || undefined,
+      coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
+      milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
+    });
     setMenuItems(updated);
     setEditingItem(null);
-    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '' });
+    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
   };
 
   const handleDeleteItem = (id: number, name: string) => {
@@ -135,7 +168,15 @@ export default function AdminDashboard() {
 
   const openEditModal = (item: MenuItem) => {
     setEditingItem(item);
-    setFormData({ name: item.name, price: item.price.toString(), category: item.category, icon: item.icon, image: item.image || '' });
+    setFormData({ 
+      name: item.name, 
+      price: item.price.toString(), 
+      category: item.category, 
+      icon: item.icon, 
+      image: item.image || '',
+      coffeeGrams: item.coffeeGrams ? item.coffeeGrams.toString() : '',
+      milkAmount: item.milkAmount ? item.milkAmount.toString() : ''
+    });
   };
 
   const handleAddCat = () => {
@@ -396,6 +437,13 @@ export default function AdminDashboard() {
                 }`}
             >
               <UtensilsCrossed className="w-4 h-4" /> Menu Items
+            </button>
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${activeTab === 'inventory' ? 'bg-hcdc-blue text-white shadow-md' : 'text-gray-500 hover:text-hcdc-blue hover:bg-hcdc-light-blue'
+                }`}
+            >
+              <Package className="w-4 h-4" /> Inventory
             </button>
           </div>
         </div>
@@ -747,7 +795,7 @@ export default function AdminDashboard() {
                     <Tag className="w-4 h-4" /> Categories
                   </button>
                   <button
-                    onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: categories[0] || 'Coffee', icon: '☕', image: '' }); }}
+                    onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: categories[0] || 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' }); }}
                     className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md"
                   >
                     <Plus className="w-4 h-4" /> Add Item
@@ -795,6 +843,113 @@ export default function AdminDashboard() {
               </div>
 
               <p className="text-center text-xs text-gray-400 font-medium">Showing {filteredMenu.length} of {menuItems.length} items</p>
+            </div>
+          )}
+
+          {/* --- INVENTORY TAB --- */}
+          {activeTab === 'inventory' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+                  <h3 className="text-xl font-black text-gray-800 mb-6">Current Stock</h3>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
+                      <span className="font-bold text-gray-600">Coffee Beans</span>
+                      <span className="text-2xl font-black text-hcdc-blue">{inventory.coffeeBeansGrams.toLocaleString()} g</span>
+                    </div>
+                    <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
+                      <span className="font-bold text-gray-600">Milk</span>
+                      <span className="text-2xl font-black text-hcdc-blue">{inventory.milkAmount.toLocaleString()} ml/pumps</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+                  <h3 className="text-xl font-black text-gray-800 mb-6">Add Stock</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Coffee Beans (g)</label>
+                      <input
+                        type="number"
+                        value={addInventoryForm.coffeeGrams}
+                        onChange={(e) => setAddInventoryForm({ ...addInventoryForm, coffeeGrams: e.target.value })}
+                        className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Milk (ml/pumps)</label>
+                      <input
+                        type="number"
+                        value={addInventoryForm.milkAmount}
+                        onChange={(e) => setAddInventoryForm({ ...addInventoryForm, milkAmount: e.target.value })}
+                        className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddInventory}
+                      className="w-full h-12 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-xl transition-all shadow-md mt-2"
+                    >
+                      Update Inventory
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
+                <div className="p-8 border-b border-gray-50">
+                  <h3 className="text-xl font-black text-gray-800">Available Servings Estimate</h3>
+                  <p className="text-xs text-gray-500 font-medium mt-1">Based on current stock and item recipes.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400 font-black">
+                        <th className="p-6">Item</th>
+                        <th className="p-6">Required Coffee (g)</th>
+                        <th className="p-6">Required Milk</th>
+                        <th className="p-6 text-right">Available Servings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {menuItems.filter(item => item.coffeeGrams || item.milkAmount).map(item => {
+                        let coffeeServings = Infinity;
+                        let milkServings = Infinity;
+                        
+                        if (item.coffeeGrams && item.coffeeGrams > 0) {
+                          coffeeServings = Math.floor(inventory.coffeeBeansGrams / item.coffeeGrams);
+                        }
+                        if (item.milkAmount && item.milkAmount > 0) {
+                          milkServings = Math.floor(inventory.milkAmount / item.milkAmount);
+                        }
+                        
+                        const minServings = Math.min(coffeeServings, milkServings);
+                        const isLow = minServings < 10;
+                        const isOut = minServings === 0;
+
+                        return (
+                          <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
+                            <td className="p-6 font-bold text-gray-800">{item.name}</td>
+                            <td className="p-6 font-mono text-sm text-gray-500">{item.coffeeGrams || '-'}</td>
+                            <td className="p-6 font-mono text-sm text-gray-500">{item.milkAmount || '-'}</td>
+                            <td className="p-6 text-right">
+                              <span className={`px-3 py-1.5 rounded-lg text-sm font-black ${isOut ? 'bg-red-100 text-red-700' : isLow ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                                {isFinite(minServings) ? minServings : '-'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {menuItems.filter(item => item.coffeeGrams || item.milkAmount).length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="p-6 text-center text-gray-400 font-medium">No items with defined coffee/milk requirements.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
@@ -856,6 +1011,28 @@ export default function AdminDashboard() {
                       <button onClick={() => setFormData(prev => ({ ...prev, image: '' }))} className="text-[10px] font-bold text-hcdc-red mt-2 hover:underline">Remove image</button>
                     )}
                   </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Coffee Beans (g)</label>
+                  <input
+                    type="number"
+                    value={formData.coffeeGrams}
+                    onChange={(e) => setFormData({ ...formData, coffeeGrams: e.target.value })}
+                    placeholder="e.g. 18"
+                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Milk (ml/pumps)</label>
+                  <input
+                    type="number"
+                    value={formData.milkAmount}
+                    onChange={(e) => setFormData({ ...formData, milkAmount: e.target.value })}
+                    placeholder="e.g. 150"
+                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
+                  />
                 </div>
               </div>
               <div>
