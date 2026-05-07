@@ -67,7 +67,7 @@ export default function AdminDashboard() {
   const [cashiers, setCashiers] = useState<CashierAccount[]>([]);
   const [showCashierModal, setShowCashierModal] = useState(false);
   const [editingCashier, setEditingCashier] = useState<CashierAccount | null>(null);
-  const [cashierForm, setCashierForm] = useState({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' });
+  const [cashierForm, setCashierForm] = useState({ name: '', usernamePrefix: '', role: 'Cashier' });
 
   // Confirmation Modals State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -213,13 +213,13 @@ export default function AdminDashboard() {
     if (!cashierForm.name || !cashierForm.usernamePrefix) return;
     const fullUsername = `${cashierForm.usernamePrefix}@alumnicafe`;
     if (editingCashier) {
-      setCashiers(updateCashier(editingCashier.id, { name: cashierForm.name, username: fullUsername, role: cashierForm.role, status: cashierForm.status }));
+      setCashiers(updateCashier(editingCashier.id, { name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
     } else {
-      setCashiers(addCashier({ name: cashierForm.name, username: fullUsername, role: cashierForm.role, status: cashierForm.status }));
+      setCashiers(addCashier({ name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
     }
     setShowCashierModal(false);
     setEditingCashier(null);
-    setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' });
+    setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier' });
   };
 
   const openEditCashier = (acc: CashierAccount) => {
@@ -227,8 +227,7 @@ export default function AdminDashboard() {
     setCashierForm({
       name: acc.name,
       usernamePrefix: acc.username.split('@')[0],
-      role: acc.role,
-      status: acc.status
+      role: acc.role
     });
     setShowCashierModal(true);
   };
@@ -297,9 +296,10 @@ export default function AdminDashboard() {
   const formatTime = (date: Date) => date.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
   // Filter transactions based on period
-  const filteredTransactions = useMemo(() => {
+  const { filteredTransactions, previousTransactions } = useMemo(() => {
     const now = new Date();
-    return transactions.filter(t => {
+    
+    const curr = transactions.filter(t => {
       const tDate = new Date(t.date);
       if (analyticsPeriod === 'daily') {
         return t.date.startsWith(now.toISOString().slice(0, 10));
@@ -312,12 +312,56 @@ export default function AdminDashboard() {
       }
       return true;
     });
+
+    const prev = transactions.filter(t => {
+      const tDate = new Date(t.date);
+      if (analyticsPeriod === 'daily') {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return t.date.startsWith(yesterday.toISOString().slice(0, 10));
+      } else if (analyticsPeriod === 'weekly') {
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(now.getDate() - 14);
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(now.getDate() - 7);
+        return tDate >= twoWeeksAgo && tDate < oneWeekAgo;
+      } else if (analyticsPeriod === 'monthly') {
+        let prevMonth = now.getMonth() - 1;
+        let prevYear = now.getFullYear();
+        if (prevMonth < 0) {
+          prevMonth = 11;
+          prevYear--;
+        }
+        return tDate.getMonth() === prevMonth && tDate.getFullYear() === prevYear;
+      }
+      return false;
+    });
+
+    return { filteredTransactions: curr, previousTransactions: prev };
   }, [transactions, analyticsPeriod]);
 
   // Calculate KPIs dynamically
   const totalSalesPeriod = filteredTransactions.reduce((sum, t) => sum + t.total, 0);
   const totalOrdersPeriod = filteredTransactions.length;
   const avgOrderValue = totalOrdersPeriod > 0 ? totalSalesPeriod / totalOrdersPeriod : 0;
+
+  const prevTotalSales = previousTransactions.reduce((sum, t) => sum + t.total, 0);
+  const prevTotalOrders = previousTransactions.length;
+  const prevAvgOrderValue = prevTotalOrders > 0 ? prevTotalSales / prevTotalOrders : 0;
+
+  const calculateTrend = (current: number, previous: number) => {
+    if (previous === 0) return current > 0 ? { trend: '+100%', up: true } : { trend: '0%', up: true };
+    const diff = current - previous;
+    const percentage = (diff / previous) * 100;
+    return {
+      trend: `${percentage > 0 ? '+' : ''}${percentage.toFixed(1)}%`,
+      up: percentage >= 0
+    };
+  };
+
+  const salesTrend = calculateTrend(totalSalesPeriod, prevTotalSales);
+  const ordersTrend = calculateTrend(totalOrdersPeriod, prevTotalOrders);
+  const avgOrderTrend = calculateTrend(avgOrderValue, prevAvgOrderValue);
 
   // Calculate Revenue Trends
   const trendData = useMemo(() => {
@@ -414,7 +458,7 @@ export default function AdminDashboard() {
   }
   const sortedTransactions = [...filteredReports].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const activeCashiersCount = cashiers.filter(c => c.status === 'Active').length;
+  const totalCashiersCount = cashiers.length;
 
   return (
     <div className="flex flex-col h-screen select-none">
@@ -517,10 +561,10 @@ export default function AdminDashboard() {
               {/* KPI Cards */}
               <div className="grid grid-cols-4 gap-6">
                 {[
-                  { label: `Total Sales (${analyticsPeriod})`, value: `₱ ${totalSalesPeriod.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: '+15.2%', up: true, icon: <BanknoteArrowUp className="w-6 h-6 text-hcdc-blue" /> },
-                  { label: `Total Orders (${analyticsPeriod})`, value: totalOrdersPeriod.toString(), trend: '+8.5%', up: true, icon: <FileText className="w-6 h-6 text-hcdc-gold" /> },
-                  { label: 'Avg Order Value', value: `₱ ${avgOrderValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: '-2.1%', up: false, icon: <TrendingUp className="w-6 h-6 text-hcdc-red" /> },
-                  { label: 'Active Cashiers', value: activeCashiersCount.toString(), trend: '0%', up: true, icon: <Users className="w-6 h-6 text-purple-600" /> },
+                  { label: `Total Sales (${analyticsPeriod})`, value: `₱ ${totalSalesPeriod.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: salesTrend.trend, up: salesTrend.up, icon: <BanknoteArrowUp className="w-6 h-6 text-hcdc-blue" /> },
+                  { label: `Total Orders (${analyticsPeriod})`, value: totalOrdersPeriod.toString(), trend: ordersTrend.trend, up: ordersTrend.up, icon: <FileText className="w-6 h-6 text-hcdc-gold" /> },
+                  { label: 'Avg Order Value', value: `₱ ${avgOrderValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: avgOrderTrend.trend, up: avgOrderTrend.up, icon: <TrendingUp className="w-6 h-6 text-hcdc-red" /> },
+                  { label: 'Total Cashiers', value: totalCashiersCount.toString(), trend: '0%', up: true, icon: <Users className="w-6 h-6 text-purple-600" /> },
                 ].map((kpi, i) => (
                   <div key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col gap-4 hover:shadow-md transition-all group">
                     <div className="flex justify-between items-start">
@@ -670,7 +714,7 @@ export default function AdminDashboard() {
                       <th className="p-6 font-black">Name</th>
                       <th className="p-6 font-black">Username</th>
                       <th className="p-6 font-black">Role</th>
-                      <th className="p-6 font-black">Status</th>
+                      <th className="p-6 font-black">Last Login</th>
                       <th className="p-6 font-black text-right">Actions</th>
                     </tr>
                   </thead>
@@ -692,10 +736,8 @@ export default function AdminDashboard() {
                           </span>
                         </td>
                         <td className="p-6">
-                          <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center w-max gap-1.5 ${acc.status === 'Active' ? 'text-green-700 bg-green-100' : 'text-red-700 bg-red-100'
-                            }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${acc.status === 'Active' ? 'bg-green-500' : 'bg-red-500'}`} />
-                            {acc.status}
+                          <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                            {acc.lastLogin || 'Never logged in'}
                           </span>
                         </td>
 
@@ -1272,7 +1314,7 @@ export default function AdminDashboard() {
                   <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">{editingCashier ? 'Edit Cashier' : 'New Cashier'}</h3>
                   <p className="text-2xl font-black tracking-tight">{editingCashier ? cashierForm.name || 'Editing...' : 'Add Account'}</p>
                 </div>
-                <button onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                <button onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier' }); }} className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1302,7 +1344,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Role</label>
                     <select
@@ -1315,22 +1357,11 @@ export default function AdminDashboard() {
                       <option value="Manager">Manager</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Status</label>
-                    <select
-                      value={cashierForm.status}
-                      onChange={(e) => setCashierForm({ ...cashierForm, status: e.target.value })}
-                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-sm transition-all focus:ring-0"
-                    >
-                      <option value="Active">Active</option>
-                      <option value="Inactive">Inactive</option>
-                    </select>
-                  </div>
                 </div>
 
                 <div className="flex gap-4 pt-4">
                   <button
-                    onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier', status: 'Active' }); }}
+                    onClick={() => { setShowCashierModal(false); setEditingCashier(null); setCashierForm({ name: '', usernamePrefix: '', role: 'Cashier' }); }}
                     className="flex-1 h-14 bg-white border-2 border-gray-100 text-gray-400 font-black rounded-2xl hover:bg-gray-50 transition-all uppercase tracking-widest text-xs"
                   >
                     Cancel

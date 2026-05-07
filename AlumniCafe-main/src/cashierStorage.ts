@@ -5,16 +5,16 @@ export interface CashierAccount {
   name: string;
   username: string;
   role: string;
-  status: string;
   password?: string;
+  lastLogin?: string;
 }
 
 const CASHIER_STORAGE_KEY = 'alumnicafe_cashiers';
 
 const DEFAULT_CASHIERS: CashierAccount[] = [
-  { id: 1, name: 'Juan Dela Cruz', username: 'juan@alumnicafe', role: 'Senior Cashier', status: 'Active', password: '12345' },
-  { id: 2, name: 'Maria Santos', username: 'maria@alumnicafe', role: 'Cashier', status: 'Active', password: '12345' },
-  { id: 3, name: 'Pedro Reyes', username: 'pedro@alumnicafe', role: 'Cashier', status: 'Inactive', password: '12345' },
+  { id: 1, name: 'Juan Dela Cruz', username: 'juan@alumnicafe', role: 'Senior Cashier', password: '12345' },
+  { id: 2, name: 'Maria Santos', username: 'maria@alumnicafe', role: 'Cashier', password: '12345' },
+  { id: 3, name: 'Pedro Reyes', username: 'pedro@alumnicafe', role: 'Cashier', password: '12345' },
 ];
 
 export function getCashiers(): CashierAccount[] {
@@ -52,4 +52,12 @@ export function deleteCashier(id: number): CashierAccount[] {
   const items = getCashiers().filter(item => item.id !== id);
   saveCashiers(items);
   return items;
+}
+
+export function recordCashierLogin(id: number): void {
+  const now = new Date();
+  updateCashier(id, { 
+    lastLogin: now.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + 
+               now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true })
+  });
 }

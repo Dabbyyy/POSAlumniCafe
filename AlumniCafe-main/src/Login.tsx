@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { getCashiers } from './cashierStorage';
+import { getCashiers, recordCashierLogin } from './cashierStorage';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -22,6 +22,7 @@ export default function Login() {
       localStorage.setItem('cashier_name', cashier.name);
       localStorage.setItem('cashier_id', cashier.id.toString());
       localStorage.setItem('cashier_role', cashier.role);
+      recordCashierLogin(cashier.id);
       navigate('/');
     } else {
       setError('Invalid username or password');
