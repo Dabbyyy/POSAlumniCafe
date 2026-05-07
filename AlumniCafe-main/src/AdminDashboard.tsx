@@ -43,8 +43,7 @@ import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount }
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu'>('analytics');
-  const [trendPeriod, setTrendPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
-  const [rankingPeriod, setRankingPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [time, setTime] = useState(new Date());
 
   // Menu management state
@@ -212,22 +211,38 @@ export default function AdminDashboard() {
   const formatDate = (date: Date) => date.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
   const formatTime = (date: Date) => date.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
+  // Filter transactions based on period
+  const filteredTransactions = useMemo(() => {
+    const now = new Date();
+    return transactions.filter(t => {
+      const tDate = new Date(t.date);
+      if (analyticsPeriod === 'daily') {
+        return t.date.startsWith(now.toISOString().slice(0, 10));
+      } else if (analyticsPeriod === 'weekly') {
+        const weekAgo = new Date();
+        weekAgo.setDate(now.getDate() - 7);
+        return tDate >= weekAgo;
+      } else if (analyticsPeriod === 'monthly') {
+        return tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+      }
+      return true;
+    });
+  }, [transactions, analyticsPeriod]);
+
   // Calculate KPIs dynamically
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayTransactions = transactions.filter(t => t.date.startsWith(todayStr));
-  const totalSalesToday = todayTransactions.reduce((sum, t) => sum + t.total, 0);
-  const totalOrdersToday = todayTransactions.length;
-  const avgOrderValue = totalOrdersToday > 0 ? totalSalesToday / totalOrdersToday : 0;
+  const totalSalesPeriod = filteredTransactions.reduce((sum, t) => sum + t.total, 0);
+  const totalOrdersPeriod = filteredTransactions.length;
+  const avgOrderValue = totalOrdersPeriod > 0 ? totalSalesPeriod / totalOrdersPeriod : 0;
   
   // Calculate Revenue Trends
   const trendData = useMemo(() => {
-    if (trendPeriod === 'daily') {
+    if (analyticsPeriod === 'daily') {
       const hourBuckets = Array.from({ length: 14 }, (_, i) => {
         const hour = i + 7; // 7 AM to 8 PM
         const displayHour = hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
         return { name: displayHour, sales: 0, orders: 0 };
       });
-      todayTransactions.forEach(t => {
+      filteredTransactions.forEach(t => {
         const isPM = t.time.includes('PM');
         const hourStr = t.time.split(':')[0];
         let hour = parseInt(hourStr, 10);
@@ -241,18 +256,13 @@ export default function AdminDashboard() {
         }
       });
       return hourBuckets;
-    } else if (trendPeriod === 'weekly') {
+    } else if (analyticsPeriod === 'weekly') {
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const weekBuckets = days.map(day => ({ name: day, sales: 0, orders: 0 }));
-      const now = new Date();
-      transactions.forEach(t => {
+      filteredTransactions.forEach(t => {
         const tDate = new Date(t.date);
-        const diffTime = Math.abs(now.getTime() - tDate.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-        if (diffDays <= 7) {
-          weekBuckets[tDate.getDay()].sales += t.total;
-          weekBuckets[tDate.getDay()].orders += 1;
-        }
+        weekBuckets[tDate.getDay()].sales += t.total;
+        weekBuckets[tDate.getDay()].orders += 1;
       });
       return weekBuckets;
     } else {
@@ -262,26 +272,23 @@ export default function AdminDashboard() {
         { name: 'Week 3', sales: 0, orders: 0 },
         { name: 'Week 4', sales: 0, orders: 0 }
       ];
-      const now = new Date();
-      transactions.forEach(t => {
+      filteredTransactions.forEach(t => {
         const tDate = new Date(t.date);
-        if (tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear()) {
-          const date = tDate.getDate();
-          const week = Math.min(Math.floor((date - 1) / 7), 3);
-          monthBuckets[week].sales += t.total;
-          monthBuckets[week].orders += 1;
-        }
+        const date = tDate.getDate();
+        const week = Math.min(Math.floor((date - 1) / 7), 3);
+        monthBuckets[week].sales += t.total;
+        monthBuckets[week].orders += 1;
       });
       return monthBuckets;
     }
-  }, [transactions, trendPeriod, todayTransactions]);
+  }, [filteredTransactions, analyticsPeriod]);
 
   // Calculate Category Sales
   const categoryData = useMemo(() => {
     const categoryTotals: Record<string, number> = {};
     let grandTotal = 0;
     
-    transactions.forEach(txn => {
+    filteredTransactions.forEach(txn => {
       txn.items.forEach(item => {
         const itemTotal = item.price * item.quantity;
         categoryTotals[item.category] = (categoryTotals[item.category] || 0) + itemTotal;
@@ -294,29 +301,13 @@ export default function AdminDashboard() {
     return Object.entries(categoryTotals)
       .map(([name, val]) => ({ name, value: Math.round((val / grandTotal) * 100) }))
       .sort((a, b) => b.value - a.value);
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   // Calculate Product Ranking
   const productRanking = useMemo(() => {
     const counts: Record<string, { quantity: number; revenue: number; category: string }> = {};
-    const now = new Date();
     
-    // Filter transactions based on period
-    const filteredTxns = transactions.filter(t => {
-      const tDate = new Date(t.date);
-      if (rankingPeriod === 'daily') {
-        return t.date.startsWith(now.toISOString().slice(0, 10));
-      } else if (rankingPeriod === 'weekly') {
-        const weekAgo = new Date();
-        weekAgo.setDate(now.getDate() - 7);
-        return tDate >= weekAgo;
-      } else if (rankingPeriod === 'monthly') {
-        return tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
-      }
-      return true;
-    });
-
-    filteredTxns.forEach(txn => {
+    filteredTransactions.forEach(txn => {
       txn.items.forEach(item => {
         if (!counts[item.name]) {
           counts[item.name] = { quantity: 0, revenue: 0, category: item.category };
@@ -329,7 +320,7 @@ export default function AdminDashboard() {
     return Object.entries(counts)
       .map(([name, stats]) => ({ name, ...stats }))
       .sort((a, b) => b.quantity - a.quantity);
-  }, [transactions, rankingPeriod]);
+  }, [filteredTransactions]);
   
   // Sort and filter transactions for the reports table
   let filteredReports = transactions;
@@ -415,11 +406,27 @@ export default function AdminDashboard() {
           {/* --- ANALYTICS TAB --- */}
           {activeTab === 'analytics' && (
             <div className="space-y-6">
+              {/* Global Analytics Filter */}
+              <div className="flex justify-end mb-2">
+                <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-100">
+                  {(['daily', 'weekly', 'monthly'] as const).map(period => (
+                    <button
+                      key={period}
+                      onClick={() => setAnalyticsPeriod(period)}
+                      className={`px-8 py-2.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${analyticsPeriod === period ? 'bg-hcdc-blue text-white shadow-md' : 'text-gray-400 hover:text-hcdc-blue hover:bg-hcdc-light-blue'
+                        }`}
+                    >
+                      {period}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* KPI Cards */}
               <div className="grid grid-cols-4 gap-6">
                 {[
-                  { label: 'Total Sales (Today)', value: `₱ ${totalSalesToday.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: '+15.2%', up: true, icon: <BanknoteArrowUp className="w-6 h-6 text-hcdc-blue" /> },
-                  { label: 'Total Orders', value: totalOrdersToday.toString(), trend: '+8.5%', up: true, icon: <FileText className="w-6 h-6 text-hcdc-gold" /> },
+                  { label: `Total Sales (${analyticsPeriod})`, value: `₱ ${totalSalesPeriod.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: '+15.2%', up: true, icon: <BanknoteArrowUp className="w-6 h-6 text-hcdc-blue" /> },
+                  { label: `Total Orders (${analyticsPeriod})`, value: totalOrdersPeriod.toString(), trend: '+8.5%', up: true, icon: <FileText className="w-6 h-6 text-hcdc-gold" /> },
                   { label: 'Avg Order Value', value: `₱ ${avgOrderValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: '-2.1%', up: false, icon: <TrendingUp className="w-6 h-6 text-hcdc-red" /> },
                   { label: 'Active Cashiers', value: activeCashiersCount.toString(), trend: '0%', up: true, icon: <Users className="w-6 h-6 text-purple-600" /> },
                 ].map((kpi, i) => (
@@ -449,18 +456,6 @@ export default function AdminDashboard() {
                     <div>
                       <h3 className="text-lg font-black text-gray-800">Revenue Trends</h3>
                       <p className="text-xs text-gray-500 font-medium">Sales performance over time</p>
-                    </div>
-                    <div className="flex bg-gray-50 p-1 rounded-lg">
-                      {(['daily', 'weekly', 'monthly'] as const).map(period => (
-                        <button
-                          key={period}
-                          onClick={() => setTrendPeriod(period)}
-                          className={`px-4 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-wider transition-colors ${trendPeriod === period ? 'bg-white shadow-sm text-hcdc-blue' : 'text-gray-400 hover:text-gray-700'
-                            }`}
-                        >
-                          {period}
-                        </button>
-                      ))}
                     </div>
                   </div>
                   <div className="h-72 w-full">
@@ -525,19 +520,6 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-500 font-medium">Performance ranking based on units sold</p>
                   </div>
                   <div className="flex gap-3 items-center">
-                    <div className="flex bg-gray-100 p-1 rounded-xl">
-                      {(['daily', 'weekly', 'monthly'] as const).map(period => (
-                        <button
-                          key={period}
-                          onClick={() => setRankingPeriod(period)}
-                          className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${rankingPeriod === period ? 'bg-white shadow-sm text-hcdc-blue' : 'text-gray-400 hover:text-gray-600'
-                            }`}
-                        >
-                          {period}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="w-px h-6 bg-gray-200 mx-1" />
                     <div className="px-4 py-2 bg-hcdc-light-blue rounded-xl text-hcdc-blue text-[10px] font-black uppercase tracking-widest">
                       Items: {productRanking.length}
                     </div>
