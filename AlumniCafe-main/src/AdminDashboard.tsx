@@ -26,7 +26,8 @@ import {
   Printer,
   Receipt,
   Tag,
-  Package
+  Package,
+  Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -39,13 +40,14 @@ import {
   Area
 } from 'recharts';
 import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, getMenuCategories, addMenuCategory, deleteMenuCategory } from './menuStorage';
-import { getTransactions, TransactionRecord } from './transactions';
+import { getTransactions, TransactionRecord, deleteTransaction, updateTransaction } from './transactions';
 import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount } from './cashierStorage';
 import { getInventory, saveInventory, Inventory, getInventoryLogs, addInventoryLog, InventoryLog } from './inventoryStorage';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu' | 'inventory'>('analytics');
-  const [analyticsPeriod, setAnalyticsPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'specific'>('weekly');
+  const [analyticsSpecificDate, setAnalyticsSpecificDate] = useState('');
   const [time, setTime] = useState(new Date());
 
   // Menu management state
@@ -55,7 +57,7 @@ export default function AdminDashboard() {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
   const [menuCategoryFilter, setMenuCategoryFilter] = useState('All');
-  const [formData, setFormData] = useState({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
+  const [formData, setFormData] = useState({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', ingredients: [] as { inventoryId: string, quantity: number }[] });
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showCategoryManager, setShowCategoryManager] = useState(false);
 
@@ -76,11 +78,32 @@ export default function AdminDashboard() {
   // Report state
   const [reportDateFilter, setReportDateFilter] = useState('');
   const [reportShiftFilter, setReportShiftFilter] = useState('All');
+  const [reportCashierFilter, setReportCashierFilter] = useState('All');
 
   // Inventory state
-  const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
+  const [inventory, setInventory] = useState<Inventory>([]);
   const [inventoryLogs, setInventoryLogs] = useState<InventoryLog[]>([]);
-  const [addInventoryForm, setAddInventoryForm] = useState({ coffeeGrams: '', milkAmount: '' });
+  const [addInventoryForm, setAddInventoryForm] = useState({ name: '', quantity: '', unit: 'g' });
+
+  // Inventory edit/delete (password-protected)
+  const [showInvAuthModal, setShowInvAuthModal] = useState(false);
+  const [invAuthAction, setInvAuthAction] = useState<'edit' | 'delete' | null>(null);
+  const [invAuthTarget, setInvAuthTarget] = useState<string | null>(null); // inventory item id
+  const [invAuthPassword, setInvAuthPassword] = useState('');
+  const [invAuthError, setInvAuthError] = useState(false);
+  const [editingInvItem, setEditingInvItem] = useState<{ id: string; name: string; quantity: string; unit: string } | null>(null);
+  const [showInvEditModal, setShowInvEditModal] = useState(false);
+
+  // Admin Auth state
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [authCallback, setAuthCallback] = useState<{ type: 'void' | 'edit' | 'delete', txn: TransactionRecord } | null>(null);
+  const [authError, setAuthError] = useState(false);
+
+  // Edit Transaction state
+  const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
+  const [editTxnForm, setEditTxnForm] = useState({ total: 0, subtotal: 0, discountAmount: 0, vatAmount: 0, items: [] as any[] });
+  const VAT_RATE = 0.12;
 
   useEffect(() => {
     setMenuItems(getMenuItems());
@@ -101,28 +124,81 @@ export default function AdminDashboard() {
     return () => { clearInterval(timer); clearInterval(refresh); };
   }, []);
 
+  // --- Inventory edit/delete handlers ---
+  const initiateInvAuth = (action: 'edit' | 'delete', itemId: string) => {
+    setInvAuthAction(action);
+    setInvAuthTarget(itemId);
+    setInvAuthPassword('');
+    setInvAuthError(false);
+    setShowInvAuthModal(true);
+  };
+
+  const handleInvAuthSubmit = () => {
+    if (invAuthPassword === 'alumnicafe') {
+      setShowInvAuthModal(false);
+      setInvAuthError(false);
+      if (invAuthAction === 'delete' && invAuthTarget) {
+        const updated = inventory.filter(i => i.id !== invAuthTarget);
+        saveInventory(updated);
+        setInventory(updated);
+      } else if (invAuthAction === 'edit' && invAuthTarget) {
+        const item = inventory.find(i => i.id === invAuthTarget);
+        if (item) {
+          setEditingInvItem({ id: item.id, name: item.name, quantity: item.quantity.toString(), unit: item.unit });
+          setShowInvEditModal(true);
+        }
+      }
+      setInvAuthAction(null);
+      setInvAuthTarget(null);
+      setInvAuthPassword('');
+    } else {
+      setInvAuthError(true);
+      setTimeout(() => setInvAuthError(false), 2000);
+    }
+  };
+
+  const handleSaveInvEdit = () => {
+    if (!editingInvItem) return;
+    const newQty = parseFloat(editingInvItem.quantity) || 0;
+    const updated = inventory.map(i =>
+      i.id === editingInvItem.id
+        ? { ...i, name: editingInvItem.name.trim(), quantity: newQty, unit: editingInvItem.unit as 'g' | 'ml' }
+        : i
+    );
+    saveInventory(updated);
+    setInventory(updated);
+    setShowInvEditModal(false);
+    setEditingInvItem(null);
+  };
+
   // Menu handlers
   const handleAddInventory = () => {
-    const addedCoffee = parseFloat(addInventoryForm.coffeeGrams) || 0;
-    const addedMilk = parseFloat(addInventoryForm.milkAmount) || 0;
+    const qty = parseFloat(addInventoryForm.quantity) || 0;
+    const name = addInventoryForm.name.trim();
     
-    if (addedCoffee > 0 || addedMilk > 0) {
+    if (qty > 0 && name) {
       const now = new Date();
       const newLogs = addInventoryLog({
         date: now.toISOString(),
         time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }),
-        addedCoffeeGrams: addedCoffee,
-        addedMilkAmount: addedMilk
+        stockName: name,
+        addedQuantity: qty,
+        unit: addInventoryForm.unit
       });
       setInventoryLogs(newLogs);
-    }
 
-    const newGrams = inventory.coffeeBeansGrams + addedCoffee;
-    const newMilk = inventory.milkAmount + addedMilk;
-    const updated = { coffeeBeansGrams: newGrams, milkAmount: newMilk };
-    saveInventory(updated);
-    setInventory(updated);
-    setAddInventoryForm({ coffeeGrams: '', milkAmount: '' });
+      const existingItem = inventory.find(i => i.name.toLowerCase() === name.toLowerCase() && i.unit === addInventoryForm.unit);
+      let updated: Inventory;
+      if (existingItem) {
+        updated = inventory.map(i => i.id === existingItem.id ? { ...i, quantity: i.quantity + qty } : i);
+      } else {
+        const newId = `inv_${Date.now()}`;
+        updated = [...inventory, { id: newId, name, quantity: qty, unit: addInventoryForm.unit as 'g'|'ml' }];
+      }
+      saveInventory(updated);
+      setInventory(updated);
+      setAddInventoryForm({ name: '', quantity: '', unit: 'g' });
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -143,11 +219,10 @@ export default function AdminDashboard() {
       category: formData.category,
       icon: formData.icon,
       image: formData.image || undefined,
-      coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
-      milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
+      ingredients: formData.ingredients
     });
     setMenuItems(updated);
-    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
+    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', ingredients: [] });
     setShowAddModal(false);
   };
 
@@ -159,12 +234,11 @@ export default function AdminDashboard() {
       category: formData.category,
       icon: formData.icon,
       image: formData.image || undefined,
-      coffeeGrams: formData.coffeeGrams ? parseFloat(formData.coffeeGrams) : undefined,
-      milkAmount: formData.milkAmount ? parseFloat(formData.milkAmount) : undefined
+      ingredients: formData.ingredients
     });
     setMenuItems(updated);
     setEditingItem(null);
-    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' });
+    setFormData({ name: '', price: '', category: 'Coffee', icon: '☕', image: '', ingredients: [] });
   };
 
   const handleDeleteItem = (id: number, name: string) => {
@@ -192,8 +266,7 @@ export default function AdminDashboard() {
       category: item.category,
       icon: item.icon,
       image: item.image || '',
-      coffeeGrams: item.coffeeGrams ? item.coffeeGrams.toString() : '',
-      milkAmount: item.milkAmount ? item.milkAmount.toString() : ''
+      ingredients: item.ingredients ? item.ingredients.map(ing => ({ ...ing })) : []
     });
   };
 
@@ -236,6 +309,80 @@ export default function AdminDashboard() {
   const handleDeleteCashier = (id: number, name: string) => {
     setItemToDelete({ id, type: 'cashier', name });
     setShowDeleteConfirm(true);
+  };
+
+  const initiateAdminAuth = (type: 'void' | 'edit' | 'delete', txn: TransactionRecord) => {
+    setAuthCallback({ type, txn });
+    setAdminPasswordInput('');
+    setAuthError(false);
+    setShowAdminAuthModal(true);
+  };
+
+  const handleAdminAuthSubmit = () => {
+    if (adminPasswordInput === 'alumnicafe') {
+      if (!authCallback) return;
+      
+      if (authCallback.type === 'void') {
+        updateTransaction(authCallback.txn.id, { status: 'Voided' });
+        setTransactions(getTransactions());
+      } else if (authCallback.type === 'delete') {
+        deleteTransaction(authCallback.txn.id);
+        setTransactions(getTransactions());
+      } else if (authCallback.type === 'edit') {
+        setEditingTransaction(authCallback.txn);
+        setEditTxnForm({ 
+          total: authCallback.txn.total, 
+          subtotal: authCallback.txn.subtotal,
+          discountAmount: authCallback.txn.discountAmount,
+          vatAmount: authCallback.txn.vatAmount,
+          items: authCallback.txn.items.map(item => ({ ...item }))
+        });
+      }
+      
+      setShowAdminAuthModal(false);
+      setAuthCallback(null);
+      setAdminPasswordInput('');
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+      setTimeout(() => setAuthError(false), 2000);
+    }
+  };
+
+  const handleSaveEditTransaction = () => {
+    if (!editingTransaction) return;
+    updateTransaction(editingTransaction.id, { 
+      total: editTxnForm.total, 
+      subtotal: editTxnForm.subtotal,
+      discountAmount: editTxnForm.discountAmount,
+      vatAmount: editTxnForm.vatAmount,
+      items: editTxnForm.items
+    });
+    setTransactions(getTransactions());
+    setEditingTransaction(null);
+  };
+
+  const handleUpdateEditItemQty = (index: number, delta: number) => {
+    const updatedItems = [...editTxnForm.items];
+    const newQty = Math.max(1, updatedItems[index].quantity + delta);
+    updatedItems[index].quantity = newQty;
+    
+    // Auto-recalculate total based on items
+    const newSubtotal = updatedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const discountRate = editingTransaction?.discountRate || 0;
+    const newDiscountAmount = newSubtotal * discountRate;
+    const taxableAmount = (newSubtotal - newDiscountAmount) / (1 + VAT_RATE);
+    const newVatAmount = newSubtotal - newDiscountAmount - taxableAmount;
+    const newTotal = newSubtotal - newDiscountAmount;
+
+    setEditTxnForm({ 
+      ...editTxnForm, 
+      items: updatedItems, 
+      total: newTotal,
+      subtotal: newSubtotal,
+      discountAmount: newDiscountAmount,
+      vatAmount: newVatAmount
+    });
   };
 
   const exportCSV = () => {
@@ -301,6 +448,7 @@ export default function AdminDashboard() {
     const now = new Date();
     
     const curr = transactions.filter(t => {
+      if (t.status === 'Voided') return false;
       const tDate = new Date(t.date);
       if (analyticsPeriod === 'daily') {
         return t.date.startsWith(now.toISOString().slice(0, 10));
@@ -310,11 +458,14 @@ export default function AdminDashboard() {
         return tDate >= weekAgo;
       } else if (analyticsPeriod === 'monthly') {
         return tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+      } else if (analyticsPeriod === 'specific') {
+        return analyticsSpecificDate ? t.date.startsWith(analyticsSpecificDate) : true;
       }
       return true;
     });
 
     const prev = transactions.filter(t => {
+      if (t.status === 'Voided') return false;
       const tDate = new Date(t.date);
       if (analyticsPeriod === 'daily') {
         const yesterday = new Date(now);
@@ -334,12 +485,18 @@ export default function AdminDashboard() {
           prevYear--;
         }
         return tDate.getMonth() === prevMonth && tDate.getFullYear() === prevYear;
+      } else if (analyticsPeriod === 'specific') {
+        if (analyticsSpecificDate) {
+          const specific = new Date(analyticsSpecificDate);
+          specific.setDate(specific.getDate() - 1);
+          return t.date.startsWith(specific.toISOString().slice(0, 10));
+        }
       }
       return false;
     });
 
     return { filteredTransactions: curr, previousTransactions: prev };
-  }, [transactions, analyticsPeriod]);
+  }, [transactions, analyticsPeriod, analyticsSpecificDate]);
 
   // Calculate KPIs dynamically
   const totalSalesPeriod = filteredTransactions.reduce((sum, t) => sum + t.total, 0);
@@ -351,7 +508,10 @@ export default function AdminDashboard() {
   const prevAvgOrderValue = prevTotalOrders > 0 ? prevTotalSales / prevTotalOrders : 0;
 
   const calculateTrend = (current: number, previous: number) => {
-    if (previous === 0) return current > 0 ? { trend: '+100%', up: true } : { trend: '0%', up: true };
+    if (previous === 0) {
+      if (current === 0) return { trend: '0.0%', up: true };
+      return { trend: `+${current > 1000 ? (current/1000).toFixed(1)+'k' : current.toFixed(0)}%`, up: true };
+    }
     const diff = current - previous;
     const percentage = (diff / previous) * 100;
     return {
@@ -366,7 +526,7 @@ export default function AdminDashboard() {
 
   // Calculate Revenue Trends
   const trendData = useMemo(() => {
-    if (analyticsPeriod === 'daily') {
+    if (analyticsPeriod === 'daily' || analyticsPeriod === 'specific') {
       const hourBuckets = Array.from({ length: 14 }, (_, i) => {
         const hour = i + 7; // 7 AM to 8 PM
         const displayHour = hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
@@ -475,6 +635,10 @@ export default function AdminDashboard() {
       return true;
     });
   }
+
+  if (reportCashierFilter !== 'All') {
+    filteredReports = filteredReports.filter(t => t.cashier === reportCashierFilter);
+  }
   
   const sortedTransactions = [...filteredReports].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -563,9 +727,19 @@ export default function AdminDashboard() {
           {activeTab === 'analytics' && (
             <div className="space-y-6">
               {/* Global Analytics Filter */}
-              <div className="flex justify-end mb-2">
+              <div className="flex justify-end mb-2 gap-3 items-center">
+                {analyticsPeriod === 'specific' && (
+                  <div className="flex items-center">
+                    <input
+                      type="date"
+                      value={analyticsSpecificDate}
+                      onChange={(e) => setAnalyticsSpecificDate(e.target.value)}
+                      className="bg-white border-2 border-gray-100 text-gray-600 px-4 py-2.5 rounded-xl font-bold text-sm focus:border-hcdc-blue focus:ring-0 transition-colors shadow-sm outline-none h-[42px]"
+                    />
+                  </div>
+                )}
                 <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-100">
-                  {(['daily', 'weekly', 'monthly'] as const).map(period => (
+                  {(['daily', 'weekly', 'monthly', 'specific'] as const).map(period => (
                     <button
                       key={period}
                       onClick={() => setAnalyticsPeriod(period)}
@@ -586,7 +760,7 @@ export default function AdminDashboard() {
                   { label: 'Avg Order Value', value: `₱ ${avgOrderValue.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, trend: avgOrderTrend.trend, up: avgOrderTrend.up, icon: <TrendingUp className="w-6 h-6 text-hcdc-red" /> },
                   { label: 'Total Cashiers', value: totalCashiersCount.toString(), trend: '0%', up: true, icon: <Users className="w-6 h-6 text-purple-600" /> },
                 ].map((kpi, i) => (
-                  <div key={i} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col gap-4 hover:shadow-md transition-all group">
+                  <div key={i} className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col gap-3 hover:shadow-md transition-all group">
                     <div className="flex justify-between items-start">
                       <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center group-hover:scale-110 transition-transform">
                         {kpi.icon}
@@ -607,7 +781,7 @@ export default function AdminDashboard() {
               {/* Charts Section */}
               <div className="grid grid-cols-3 gap-6">
                 {/* Main Trend Chart */}
-                <div className="col-span-2 bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+                <div className="col-span-2 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <div className="flex justify-between items-center mb-8">
                     <div>
                       <h3 className="text-lg font-black text-gray-800">Revenue Trends</h3>
@@ -637,7 +811,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Category Breakdown */}
-                <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col">
+                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm flex flex-col">
                   <div className="mb-8">
                     <h3 className="text-lg font-black text-gray-800">Sales by Category</h3>
                     <p className="text-xs text-gray-500 font-medium">Distribution of revenue</p>
@@ -669,7 +843,7 @@ export default function AdminDashboard() {
               </div>
 
               {/* Product Ranking Section */}
-              <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+              <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                 <div className="mb-8 flex justify-between items-center">
                   <div>
                     <h3 className="text-lg font-black text-gray-800">Top Selling Products</h3>
@@ -716,7 +890,7 @@ export default function AdminDashboard() {
 
           {/* --- CASHIERS TAB --- */}
           {activeTab === 'cashiers' && (
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="p-8 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
                 <div>
                   <h3 className="text-xl font-black text-gray-800">Manage Accounts</h3>
@@ -779,7 +953,7 @@ export default function AdminDashboard() {
 
           {/* --- SALES REPORT TAB --- */}
           {activeTab === 'reports' && (
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[700px]">
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[700px]">
               <div className="p-8 border-b border-gray-50 flex justify-between items-center bg-gray-50/50 shrink-0">
                 <div>
                   <h3 className="text-xl font-black text-gray-800">Transaction History</h3>
@@ -821,6 +995,22 @@ export default function AdminDashboard() {
                       <option value="Shift 3">Shift 3 (6:20 PM - 12:00 MN)</option>
                     </select>
                   </div>
+
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Users className="w-4 h-4 text-gray-400" />
+                    </div>
+                    <select
+                      value={reportCashierFilter}
+                      onChange={(e) => setReportCashierFilter(e.target.value)}
+                      className="bg-white border-2 border-gray-100 text-gray-600 pl-10 pr-8 py-2 rounded-xl font-bold text-sm focus:border-hcdc-blue focus:ring-0 transition-colors shadow-sm outline-none appearance-none"
+                    >
+                      <option value="All">All Cashiers</option>
+                      {Array.from(new Set(transactions.map(t => t.cashier))).map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
                   <button
                     onClick={exportCSV}
                     disabled={sortedTransactions.length === 0}
@@ -836,6 +1026,7 @@ export default function AdminDashboard() {
                   <thead className="sticky top-0 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.05)] z-10">
                     <tr className="border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400 font-black">
                       <th className="p-6 font-black">Transaction ID</th>
+                      <th className="p-6 font-black">Date</th>
                       <th className="p-6 font-black">Time</th>
                       <th className="p-6 font-black">Cashier</th>
                       <th className="p-6 font-black text-right">Amount</th>
@@ -846,29 +1037,51 @@ export default function AdminDashboard() {
                   <tbody className="divide-y divide-gray-50">
                     {sortedTransactions.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-10 text-center text-gray-400 font-medium">No transactions yet.</td>
+                        <td colSpan={7} className="p-10 text-center text-gray-400 font-medium">No transactions yet.</td>
                       </tr>
                     ) : (
                       sortedTransactions.map((txn, i) => (
                         <tr key={i} className="hover:bg-gray-50/50 transition-colors">
                           <td className="p-6 font-mono text-sm font-bold text-hcdc-blue">{txn.id}</td>
+                          <td className="p-6 text-sm font-bold text-gray-700">{txn.date.split('T')[0]}</td>
                           <td className="p-6 text-sm text-gray-500 font-medium">{txn.time}</td>
                           <td className="p-6 text-sm font-bold text-gray-700">{txn.cashier}</td>
                           <td className="p-6 text-right font-black text-gray-800">
                             ₱ {txn.total.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="p-6 text-center">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-green-700 bg-green-100 px-3 py-1.5 rounded-lg inline-block">
-                              Completed
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg inline-block ${
+                              txn.status === 'Voided' ? 'text-red-700 bg-red-100' : 'text-green-700 bg-green-100'
+                            }`}>
+                              {txn.status || 'Completed'}
                             </span>
                           </td>
                           <td className="p-6 text-center">
-                            <button
-                              onClick={() => setViewingReceipt(txn)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-hcdc-light-blue text-hcdc-blue rounded-lg text-[11px] font-bold transition-colors"
-                            >
-                              <Receipt className="w-3.5 h-3.5" /> View
-                            </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => setViewingReceipt(txn)}
+                                className="p-2 bg-gray-50 hover:bg-hcdc-light-blue text-hcdc-blue rounded-lg transition-colors"
+                                title="View Receipt"
+                              >
+                                <Receipt className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => initiateAdminAuth('edit', txn)}
+                                className="p-2 bg-gray-50 hover:bg-hcdc-gold/20 text-hcdc-gold rounded-lg transition-colors"
+                                title="Edit Transaction"
+                                disabled={txn.status === 'Voided'}
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => initiateAdminAuth('void', txn)}
+                                className="p-2 bg-gray-50 hover:bg-red-50 text-hcdc-red rounded-lg transition-colors"
+                                title="Void Transaction"
+                                disabled={txn.status === 'Voided'}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -917,7 +1130,7 @@ export default function AdminDashboard() {
                     <Tag className="w-4 h-4" /> Categories
                   </button>
                   <button
-                    onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: categories[0] || 'Coffee', icon: '☕', image: '', coffeeGrams: '', milkAmount: '' }); }}
+                    onClick={() => { setShowAddModal(true); setEditingItem(null); setFormData({ name: '', price: '', category: categories[0] || 'Coffee', icon: '☕', image: '', ingredients: [] }); }}
                     className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md"
                   >
                     <Plus className="w-4 h-4" /> Add Item
@@ -926,9 +1139,9 @@ export default function AdminDashboard() {
               </div>
 
               {/* Menu Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
                 {filteredMenu.map((item) => (
-                  <div key={item.id} className="bg-white rounded-[2rem] p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all group relative">
+                  <div key={item.id} className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all group relative">
                     <div className="flex flex-col items-center text-center gap-3">
                       <div className="w-16 h-16 rounded-2xl bg-hcdc-light-blue flex items-center justify-center overflow-hidden">
                         {item.image ? (
@@ -972,42 +1185,78 @@ export default function AdminDashboard() {
           {activeTab === 'inventory' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-6">
-                <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <h3 className="text-xl font-black text-gray-800 mb-6">Current Stock</h3>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
-                      <span className="font-bold text-gray-600">Coffee Beans</span>
-                      <span className="text-2xl font-black text-hcdc-blue">{inventory.coffeeBeansGrams.toLocaleString()} g</span>
-                    </div>
-                    <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl">
-                      <span className="font-bold text-gray-600">Milk</span>
-                      <span className="text-2xl font-black text-hcdc-blue">{inventory.milkAmount.toLocaleString()} ml</span>
-                    </div>
+                  <div className="space-y-3">
+                    {inventory.length === 0 ? (
+                      <p className="text-sm text-gray-500 text-center py-4">No stock items available.</p>
+                    ) : (
+                      inventory.map(stock => (
+                        <div key={stock.id} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl group hover:bg-white hover:shadow-md border-2 border-transparent hover:border-gray-100 transition-all">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-gray-700 truncate">{stock.name}</p>
+                            <p className="text-xs text-gray-400 font-medium">{stock.unit === 'g' ? 'Grams' : 'Millilitres'}</p>
+                          </div>
+                          <span className="text-xl font-black text-hcdc-blue tabular-nums shrink-0">
+                            {stock.quantity.toLocaleString()} {stock.unit}
+                          </span>
+                          <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <button
+                              onClick={() => initiateInvAuth('edit', stock.id)}
+                              title="Edit ingredient"
+                              className="w-8 h-8 rounded-xl bg-hcdc-light-blue text-hcdc-blue flex items-center justify-center hover:bg-hcdc-blue hover:text-white transition-all"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => initiateInvAuth('delete', stock.id)}
+                              title="Delete ingredient"
+                              className="w-8 h-8 rounded-xl bg-red-50 text-hcdc-red flex items-center justify-center hover:bg-hcdc-red hover:text-white transition-all"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
-                <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm">
+                <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                   <h3 className="text-xl font-black text-gray-800 mb-6">Add Stock</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Coffee Beans (g)</label>
+                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Name of Stock</label>
                       <input
-                        type="number"
-                        value={addInventoryForm.coffeeGrams}
-                        onChange={(e) => setAddInventoryForm({ ...addInventoryForm, coffeeGrams: e.target.value })}
+                        type="text"
+                        value={addInventoryForm.name}
+                        onChange={(e) => setAddInventoryForm({ ...addInventoryForm, name: e.target.value })}
                         className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
-                        placeholder="0"
+                        placeholder="e.g. Sugar, Cups"
                       />
                     </div>
-                    <div>
-                      <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Add Milk (ml)</label>
-                      <input
-                        type="number"
-                        value={addInventoryForm.milkAmount}
-                        onChange={(e) => setAddInventoryForm({ ...addInventoryForm, milkAmount: e.target.value })}
-                        className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
-                        placeholder="0"
-                      />
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Measurements</label>
+                        <input
+                          type="number"
+                          value={addInventoryForm.quantity}
+                          onChange={(e) => setAddInventoryForm({ ...addInventoryForm, quantity: e.target.value })}
+                          className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div className="w-24">
+                        <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Unit</label>
+                        <select
+                          value={addInventoryForm.unit}
+                          onChange={(e) => setAddInventoryForm({ ...addInventoryForm, unit: e.target.value })}
+                          className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue rounded-xl font-bold transition-all"
+                        >
+                          <option value="g">g</option>
+                          <option value="ml">ml</option>
+                        </select>
+                      </div>
                     </div>
                     <button
                       onClick={handleAddInventory}
@@ -1019,7 +1268,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="p-8 border-b border-gray-50">
                   <h3 className="text-xl font-black text-gray-800">Available Servings Estimate</h3>
                   <p className="text-xs text-gray-500 font-medium mt-1">Based on current stock and item recipes.</p>
@@ -1029,32 +1278,35 @@ export default function AdminDashboard() {
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400 font-black">
                         <th className="p-6">Item</th>
-                        <th className="p-6">Required Coffee (g)</th>
-                        <th className="p-6">Required Milk</th>
+                        <th className="p-6">Required Ingredients</th>
                         <th className="p-6 text-right">Available Servings</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {menuItems.filter(item => item.coffeeGrams || item.milkAmount).map(item => {
-                        let coffeeServings = Infinity;
-                        let milkServings = Infinity;
+                      {menuItems.filter(item => item.ingredients && item.ingredients.length > 0).map(item => {
+                        let minServings = Infinity;
 
-                        if (item.coffeeGrams && item.coffeeGrams > 0) {
-                          coffeeServings = Math.floor(inventory.coffeeBeansGrams / item.coffeeGrams);
-                        }
-                        if (item.milkAmount && item.milkAmount > 0) {
-                          milkServings = Math.floor(inventory.milkAmount / item.milkAmount);
-                        }
+                        item.ingredients?.forEach(ing => {
+                          const stockItem = inventory.find(i => i.id === ing.inventoryId);
+                          const stockQty = stockItem ? stockItem.quantity : 0;
+                          const servings = Math.floor(stockQty / ing.quantity);
+                          if (servings < minServings) minServings = servings;
+                        });
 
-                        const minServings = Math.min(coffeeServings, milkServings);
                         const isLow = minServings < 10;
                         const isOut = minServings === 0;
 
                         return (
                           <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
                             <td className="p-6 font-bold text-gray-800">{item.name}</td>
-                            <td className="p-6 font-mono text-sm text-gray-500">{item.coffeeGrams || '-'}</td>
-                            <td className="p-6 font-mono text-sm text-gray-500">{item.milkAmount || '-'}</td>
+                            <td className="p-6 font-mono text-sm text-gray-500">
+                              {item.ingredients?.map((ing, i) => {
+                                const stockItem = inventory.find(stock => stock.id === ing.inventoryId);
+                                return (
+                                  <div key={i}>{stockItem ? stockItem.name : 'Unknown'}: {ing.quantity}{stockItem?.unit}</div>
+                                );
+                              })}
+                            </td>
                             <td className="p-6 text-right">
                               <span className={`px-3 py-1.5 rounded-lg text-sm font-black ${isOut ? 'bg-red-100 text-red-700' : isLow ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
                                 {isFinite(minServings) ? minServings : '-'}
@@ -1063,9 +1315,9 @@ export default function AdminDashboard() {
                           </tr>
                         );
                       })}
-                      {menuItems.filter(item => item.coffeeGrams || item.milkAmount).length === 0 && (
+                      {menuItems.filter(item => item.ingredients && item.ingredients.length > 0).length === 0 && (
                         <tr>
-                          <td colSpan={4} className="p-6 text-center text-gray-400 font-medium">No items with defined coffee/milk requirements.</td>
+                          <td colSpan={3} className="p-6 text-center text-gray-400 font-medium">No items with defined ingredients.</td>
                         </tr>
                       )}
                     </tbody>
@@ -1073,7 +1325,7 @@ export default function AdminDashboard() {
                 </div>
               </div>
               
-              <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden mt-8">
+              <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden mt-8">
                 <div className="p-8 border-b border-gray-50 flex justify-between items-center">
                   <div>
                     <h3 className="text-xl font-black text-gray-800">Inventory Logs</h3>
@@ -1093,33 +1345,24 @@ export default function AdminDashboard() {
                       <tr className="bg-gray-50 border-b border-gray-100 text-[10px] uppercase tracking-widest text-gray-400 font-black">
                         <th className="p-6">Date</th>
                         <th className="p-6">Time</th>
-                        <th className="p-6">Added Coffee (g)</th>
-                        <th className="p-6">Added Milk (ml)</th>
-                        <th className="p-6 text-right">Estimated Servings</th>
+                        <th className="p-6">Stock Added</th>
+                        <th className="p-6">Quantity Added</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {[...inventoryLogs].sort((a, b) => b.id - a.id).map(log => {
-                        const coffeeServings = Math.floor(log.addedCoffeeGrams / 18);
-                        const milkServings = Math.floor(log.addedMilkAmount / 150);
-                        const servingsText = [
-                          coffeeServings > 0 ? `${coffeeServings} coffee` : '',
-                          milkServings > 0 ? `${milkServings} milk` : ''
-                        ].filter(Boolean).join(' & ') || '-';
-                        
                         return (
                           <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
                             <td className="p-6 font-bold text-gray-800">{log.date.split('T')[0]}</td>
                             <td className="p-6 font-mono text-sm text-gray-500">{log.time}</td>
-                            <td className="p-6 font-mono text-sm text-green-600 font-bold">+{log.addedCoffeeGrams}</td>
-                            <td className="p-6 font-mono text-sm text-green-600 font-bold">+{log.addedMilkAmount}</td>
-                            <td className="p-6 text-right font-mono text-sm text-gray-500">{servingsText}</td>
+                            <td className="p-6 font-bold text-gray-800">{log.stockName}</td>
+                            <td className="p-6 font-mono text-sm text-green-600 font-bold">+{log.addedQuantity} {log.unit}</td>
                           </tr>
                         );
                       })}
                       {inventoryLogs.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="p-6 text-center text-gray-400 font-medium">No inventory logs found.</td>
+                          <td colSpan={4} className="p-6 text-center text-gray-400 font-medium">No inventory logs found.</td>
                         </tr>
                       )}
                     </tbody>
@@ -1131,6 +1374,140 @@ export default function AdminDashboard() {
 
         </div>
       </div>
+
+      {/* INVENTORY ADMIN AUTH MODAL */}
+      <AnimatePresence>
+        {showInvAuthModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-sm shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="bg-hcdc-blue p-8 text-white text-center">
+                <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Shield className="w-8 h-8 text-hcdc-gold" />
+                </div>
+                <h3 className="text-xl font-black">Admin Authentication</h3>
+                <p className="text-sm text-white/60 mt-1 uppercase tracking-widest font-bold">
+                  Required to {invAuthAction} ingredient
+                </p>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Admin Password</label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={invAuthPassword}
+                    onChange={(e) => setInvAuthPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleInvAuthSubmit()}
+                    className={`w-full h-14 px-6 bg-gray-50 border-2 rounded-2xl font-bold text-center text-xl transition-all focus:ring-0 ${
+                      invAuthError ? 'border-hcdc-red bg-red-50' : 'border-transparent focus:border-hcdc-blue focus:bg-white'
+                    }`}
+                    placeholder="••••••••"
+                  />
+                  {invAuthError && (
+                    <p className="text-hcdc-red text-[10px] font-black uppercase tracking-widest text-center mt-3 animate-pulse">Incorrect Password</p>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { setShowInvAuthModal(false); setInvAuthAction(null); setInvAuthTarget(null); setInvAuthPassword(''); }}
+                    className="flex-1 h-12 bg-gray-50 text-gray-400 font-bold rounded-xl hover:bg-gray-100 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleInvAuthSubmit}
+                    className="flex-1 h-12 bg-hcdc-blue text-white font-bold rounded-xl hover:bg-hcdc-blue-dark shadow-lg shadow-hcdc-blue/20 transition-all"
+                  >
+                    Verify
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* INVENTORY EDIT MODAL */}
+      <AnimatePresence>
+        {showInvEditModal && editingInvItem && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-sm shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="bg-hcdc-blue p-8 text-white flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">Edit Ingredient</h3>
+                  <p className="text-2xl font-black tracking-tight">{editingInvItem.name}</p>
+                </div>
+                <button
+                  onClick={() => { setShowInvEditModal(false); setEditingInvItem(null); }}
+                  className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-8 space-y-5">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={editingInvItem.name}
+                    onChange={(e) => setEditingInvItem({ ...editingInvItem, name: e.target.value })}
+                    className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-xl font-bold transition-all focus:ring-0"
+                    placeholder="e.g. Coffee Beans"
+                  />
+                </div>
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Quantity</label>
+                    <input
+                      type="number"
+                      value={editingInvItem.quantity}
+                      onChange={(e) => setEditingInvItem({ ...editingInvItem, quantity: e.target.value })}
+                      className="w-full h-12 px-4 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-xl font-bold transition-all focus:ring-0"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="w-28">
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Unit</label>
+                    <select
+                      value={editingInvItem.unit}
+                      onChange={(e) => setEditingInvItem({ ...editingInvItem, unit: e.target.value })}
+                      className="w-full h-12 px-3 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-xl font-bold transition-all focus:ring-0"
+                    >
+                      <option value="g">g</option>
+                      <option value="ml">ml</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => { setShowInvEditModal(false); setEditingInvItem(null); }}
+                    className="flex-1 h-12 bg-gray-50 text-gray-400 font-bold rounded-xl hover:bg-gray-100 transition-all uppercase tracking-widest text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveInvEdit}
+                    disabled={!editingInvItem.name.trim()}
+                    className="flex-[2] h-12 bg-hcdc-blue hover:bg-hcdc-blue-dark text-white font-black rounded-xl shadow-lg shadow-hcdc-blue/20 flex items-center justify-center gap-2 transition-all disabled:opacity-30 text-sm uppercase tracking-wider"
+                  >
+                    <Save className="w-4 h-4" /> Save Changes
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ADD / EDIT MODAL */}
       <AnimatePresence>
@@ -1189,27 +1566,59 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Coffee Beans (g)</label>
-                    <input
-                      type="number"
-                      value={formData.coffeeGrams}
-                      onChange={(e) => setFormData({ ...formData, coffeeGrams: e.target.value })}
-                      placeholder="e.g. 18"
-                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
-                    />
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block">Required Ingredients</label>
+                    <button
+                      onClick={() => setFormData({ ...formData, ingredients: [...formData.ingredients, { inventoryId: inventory[0]?.id || '', quantity: 0 }] })}
+                      className="text-xs font-bold text-hcdc-blue hover:underline flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Add Ingredient
+                    </button>
                   </div>
-                  <div>
-                    <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Milk (ml/pumps)</label>
-                    <input
-                      type="number"
-                      value={formData.milkAmount}
-                      onChange={(e) => setFormData({ ...formData, milkAmount: e.target.value })}
-                      placeholder="e.g. 150"
-                      className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all focus:ring-0"
-                    />
-                  </div>
+                  {formData.ingredients.map((ing, idx) => (
+                    <div key={idx} className="flex items-center gap-3 bg-gray-50 p-3 rounded-2xl border-2 border-transparent focus-within:border-hcdc-blue/30 transition-all">
+                      <select
+                        value={ing.inventoryId}
+                        onChange={(e) => {
+                          const newIng = [...formData.ingredients];
+                          newIng[idx].inventoryId = e.target.value;
+                          setFormData({ ...formData, ingredients: newIng });
+                        }}
+                        className="flex-1 bg-white h-10 px-3 rounded-xl border border-gray-100 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-hcdc-blue/20"
+                      >
+                        <option value="" disabled>Select Stock</option>
+                        {inventory.map(stock => (
+                          <option key={stock.id} value={stock.id}>{stock.name} ({stock.unit})</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        value={ing.quantity || ''}
+                        onChange={(e) => {
+                          const newIng = [...formData.ingredients];
+                          newIng[idx].quantity = parseFloat(e.target.value) || 0;
+                          setFormData({ ...formData, ingredients: newIng });
+                        }}
+                        placeholder="Qty"
+                        className="w-24 bg-white h-10 px-3 rounded-xl border border-gray-100 font-bold text-sm text-center focus:outline-none focus:ring-2 focus:ring-hcdc-blue/20"
+                      />
+                      <button
+                        onClick={() => {
+                          const newIng = formData.ingredients.filter((_, i) => i !== idx);
+                          setFormData({ ...formData, ingredients: newIng });
+                        }}
+                        className="w-8 h-8 rounded-full bg-red-100 text-red-500 flex items-center justify-center hover:bg-red-200 transition-colors shrink-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {formData.ingredients.length === 0 && (
+                    <div className="text-center py-4 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                      <p className="text-sm font-medium text-gray-400">No ingredients added</p>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Category</label>
@@ -1464,6 +1873,134 @@ export default function AdminDashboard() {
                   {categories.length === 0 && (
                     <p className="text-center text-gray-400 text-sm py-4">No categories created yet.</p>
                   )}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ADMIN AUTH MODAL */}
+      <AnimatePresence>
+        {showAdminAuthModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-sm shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="bg-hcdc-blue p-8 text-white text-center">
+                <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Shield className="w-8 h-8 text-hcdc-gold" />
+                </div>
+                <h3 className="text-xl font-black">Admin Authentication</h3>
+                <p className="text-sm text-white/60 mt-1 uppercase tracking-widest font-bold">Required to {authCallback?.type} transaction</p>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Admin Password</label>
+                  <input
+                    type="password"
+                    autoFocus
+                    value={adminPasswordInput}
+                    onChange={(e) => setAdminPasswordInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAdminAuthSubmit()}
+                    className={`w-full h-14 px-6 bg-gray-50 border-2 rounded-2xl font-bold text-center text-xl transition-all focus:ring-0 ${
+                      authError ? 'border-hcdc-red bg-red-50' : 'border-transparent focus:border-hcdc-blue focus:bg-white'
+                    }`}
+                    placeholder="••••••••"
+                  />
+                  {authError && (
+                    <p className="text-hcdc-red text-[10px] font-black uppercase tracking-widest text-center mt-3 animate-pulse">Incorrect Password</p>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { setShowAdminAuthModal(false); setAuthCallback(null); }}
+                    className="flex-1 h-12 bg-gray-50 text-gray-400 font-bold rounded-xl hover:bg-gray-100 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAdminAuthSubmit}
+                    className="flex-1 h-12 bg-hcdc-blue text-white font-bold rounded-xl hover:bg-hcdc-blue-dark shadow-lg shadow-hcdc-blue/20 transition-all"
+                  >
+                    Verify
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* EDIT TRANSACTION MODAL */}
+      <AnimatePresence>
+        {editingTransaction && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden border border-gray-100"
+            >
+              <div className="bg-hcdc-gold p-8 text-hcdc-blue">
+                <h3 className="text-sm font-black uppercase tracking-widest opacity-60 mb-1">Edit Transaction</h3>
+                <p className="text-2xl font-black tracking-tight">{editingTransaction.id}</p>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <label className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-400 block mb-2">Total Amount (₱)</label>
+                  <input
+                    type="number"
+                    value={editTxnForm.total}
+                    onChange={(e) => setEditTxnForm({ ...editTxnForm, total: parseFloat(e.target.value) || 0 })}
+                    className="w-full h-14 px-6 bg-gray-50 border-2 border-transparent focus:border-hcdc-blue focus:bg-white rounded-2xl font-bold text-lg transition-all"
+                  />
+                </div>
+                <div className="bg-blue-50 p-6 rounded-[2rem] border border-hcdc-blue/10">
+                  <p className="text-[11px] text-hcdc-blue font-black uppercase tracking-[0.2em] mb-4">Edit Items Sold</p>
+                  <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                    {editTxnForm.items.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-white/50 p-3 rounded-xl border border-hcdc-blue/5">
+                        <div className="flex-1 min-w-0 mr-4">
+                          <p className="font-bold text-gray-800 text-sm truncate">{item.name}</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tighter">₱{item.price.toFixed(2)} / unit</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={() => handleUpdateEditItemQty(idx, -1)}
+                            className="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-hcdc-red hover:border-hcdc-red/20 transition-all shadow-sm"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="w-6 text-center font-black text-hcdc-blue text-sm">{item.quantity}</span>
+                          <button 
+                            onClick={() => handleUpdateEditItemQty(idx, 1)}
+                            className="w-8 h-8 rounded-lg bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-hcdc-blue hover:border-hcdc-blue/20 transition-all shadow-sm"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setEditingTransaction(null)}
+                    className="flex-1 h-14 bg-gray-50 text-gray-400 font-bold rounded-2xl hover:bg-gray-100 transition-all uppercase tracking-widest text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveEditTransaction}
+                    className="flex-[2] h-14 bg-hcdc-blue text-white font-black rounded-2xl shadow-xl shadow-hcdc-blue/30 transition-all hover:scale-[1.02] active:scale-95 uppercase tracking-wider text-sm"
+                  >
+                    Update Record
+                  </button>
                 </div>
               </div>
             </motion.div>

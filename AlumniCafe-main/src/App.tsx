@@ -35,8 +35,7 @@ interface Product {
   category: string;
   icon: string;
   image?: string;
-  coffeeGrams?: number;
-  milkAmount?: number;
+  ingredients?: { inventoryId: string; quantity: number }[];
 }
 
 interface CartItem extends Product {
@@ -44,45 +43,6 @@ interface CartItem extends Product {
 }
 
 type DiscountType = 'REGULAR' | 'PWD' | 'SENIOR' | 'ALUMNI';
-
-// --- Constant Data ---
-const PRODUCTS: Product[] = [
-  // COFFEE
-  { id: 1, name: 'Brewed Coffee', price: 55, category: 'Coffee', icon: '☕' },
-  { id: 2, name: 'Americano', price: 75, category: 'Coffee', icon: '☕' },
-  { id: 3, name: 'Café Latte', price: 95, category: 'Coffee', icon: '🥛' },
-  { id: 4, name: 'Cappuccino', price: 95, category: 'Coffee', icon: '☕' },
-  { id: 5, name: 'Mocha Frappe', price: 120, category: 'Coffee', icon: '❄️' },
-  { id: 6, name: 'Caramel Macchiato', price: 125, category: 'Coffee', icon: '🍮' },
-  { id: 7, name: 'Spanish Latte', price: 115, category: 'Coffee', icon: '☕' },
-  { id: 8, name: 'Iced Coffee', price: 85, category: 'Coffee', icon: '🧊' },
-  // NON-COFFEE
-  { id: 9, name: 'Hot Choco', price: 80, category: 'Non-Coffee', icon: '🍫' },
-  { id: 10, name: 'Matcha Latte', price: 115, category: 'Non-Coffee', icon: '🍵' },
-  { id: 11, name: 'Iced Tea', price: 65, category: 'Non-Coffee', icon: '🍹' },
-  { id: 12, name: 'Lemonade', price: 70, category: 'Non-Coffee', icon: '🍋' },
-  { id: 13, name: 'Fruit Shake', price: 90, category: 'Non-Coffee', icon: '🍓' },
-  { id: 14, name: 'Taro Milk Tea', price: 110, category: 'Non-Coffee', icon: '🧋' },
-  // FOOD
-  { id: 15, name: 'Cheese Pandesal', price: 45, category: 'Food', icon: '🍞' },
-  { id: 16, name: 'Club Sandwich', price: 120, category: 'Food', icon: '🥪' },
-  { id: 17, name: 'Pasta Carbonara', price: 145, category: 'Food', icon: '🍝' },
-  { id: 18, name: 'Pancake Set', price: 110, category: 'Food', icon: '🥞' },
-  { id: 19, name: 'Fries', price: 75, category: 'Food', icon: '🍟' },
-  { id: 20, name: 'Fried Rice', price: 85, category: 'Food', icon: '🍚' },
-  { id: 21, name: 'Hotdog Sandwich', price: 95, category: 'Food', icon: '🌭' },
-  // PASTRY & SNACKS
-  { id: 22, name: 'Ensaymada', price: 55, category: 'Pastry & Snacks', icon: '🥨' },
-  { id: 23, name: 'Cinnamon Roll', price: 75, category: 'Pastry & Snacks', icon: '🌀' },
-  { id: 24, name: 'Choco Muffin', price: 65, category: 'Pastry & Snacks', icon: '🧁' },
-  { id: 25, name: 'Banana Bread', price: 70, category: 'Pastry & Snacks', icon: '🍞' },
-  { id: 26, name: 'Croissant', price: 80, category: 'Pastry & Snacks', icon: '🥐' },
-  // DESSERTS
-  { id: 27, name: 'Blueberry Cheesecake', price: 130, category: 'Desserts', icon: '🍰' },
-  { id: 28, name: 'Leche Flan', price: 95, category: 'Desserts', icon: '🍮' },
-  { id: 29, name: 'Halo-Halo', price: 120, category: 'Desserts', icon: '🍨' },
-  { id: 30, name: 'Buko Pandan', price: 85, category: 'Desserts', icon: '🍧' },
-];
 
 const VAT_RATE = 0.12;
 
@@ -125,7 +85,7 @@ export default function App() {
   const [animations, setAnimations] = useState<{ id: number; key: number }[]>([]);
   const [products, setProducts] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
+  const [inventory, setInventory] = useState<Inventory>([]);
   
   const [newProduct, setNewProduct] = useState({ name: '', price: 0, category: 'Coffee', icon: '☕' });
 
@@ -182,20 +142,26 @@ export default function App() {
 
   // --- Handlers ---
   const usedInventory = useMemo(() => {
-    let coffee = 0;
-    let milk = 0;
+    const usage: Record<string, number> = {};
     cart.forEach(item => {
-      coffee += (item.coffeeGrams || 0) * item.quantity;
-      milk += (item.milkAmount || 0) * item.quantity;
+      if (item.ingredients) {
+        item.ingredients.forEach(ing => {
+          usage[ing.inventoryId] = (usage[ing.inventoryId] || 0) + (ing.quantity * item.quantity);
+        });
+      }
     });
-    return { coffee, milk };
+    return usage;
   }, [cart]);
 
   const canAddProduct = (product: Product, deltaQty: number) => {
-    const reqCoffee = (product.coffeeGrams || 0) * deltaQty;
-    const reqMilk = (product.milkAmount || 0) * deltaQty;
-    if (usedInventory.coffee + reqCoffee > inventory.coffeeBeansGrams) return false;
-    if (usedInventory.milk + reqMilk > inventory.milkAmount) return false;
+    if (!product.ingredients) return true;
+    for (const ing of product.ingredients) {
+      const required = ing.quantity * deltaQty;
+      const alreadyUsed = usedInventory[ing.inventoryId] || 0;
+      const stockItem = inventory.find(i => i.id === ing.inventoryId);
+      const stockQty = stockItem ? stockItem.quantity : 0;
+      if (alreadyUsed + required > stockQty) return false;
+    }
     return true;
   };
 
@@ -279,10 +245,10 @@ export default function App() {
     });
 
     // Deduct inventory
-    const newInventory = {
-      coffeeBeansGrams: inventory.coffeeBeansGrams - usedInventory.coffee,
-      milkAmount: inventory.milkAmount - usedInventory.milk,
-    };
+    const newInventory = inventory.map(stock => {
+      const used = usedInventory[stock.id] || 0;
+      return { ...stock, quantity: Math.max(0, stock.quantity - used) };
+    });
     saveInventory(newInventory);
     setInventory(newInventory);
 
@@ -372,9 +338,9 @@ export default function App() {
 
       <main className="flex flex-1 overflow-hidden relative">
         {/* PANEL 1: Categories sidebar */}
-        <aside className="w-72 bg-white border-r border-gray-100 flex flex-col shrink-0 shadow-sm z-10">
-          <div className="p-8">
-            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-8 flex items-center gap-3">
+        <aside className="w-64 bg-white border-r border-gray-100 flex flex-col shrink-0 shadow-sm z-10">
+          <div className="p-6">
+            <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-6 flex items-center gap-3">
               <Tag className="w-3 h-3 text-hcdc-gold" /> Menu Categories
             </h2>
             <nav className="flex flex-col gap-3">
@@ -407,7 +373,7 @@ export default function App() {
               ))}
             </nav>
           </div>
-          <div className="mt-auto p-8 bg-gradient-to-b from-transparent to-hcdc-light-blue/20">
+          <div className="mt-auto p-6 bg-gradient-to-b from-transparent to-hcdc-light-blue/20">
             <div className="p-4 rounded-2xl bg-white border border-hcdc-blue/5 shadow-sm text-center">
               <p className="text-[10px] text-hcdc-blue font-black uppercase tracking-widest mb-1 italic">
                 Our Mission
@@ -438,32 +404,35 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto pr-4 -mr-4 custom-scrollbar">
-            <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6 pb-12">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-12">
               {filteredProducts.map((product) => {
-                let coffeeServings = Infinity;
-                let milkServings = Infinity;
-                
-                if (product.coffeeGrams && product.coffeeGrams > 0) {
-                  coffeeServings = Math.floor((inventory.coffeeBeansGrams - usedInventory.coffee) / product.coffeeGrams);
+                let minServings = Infinity;
+                let hasInventoryTracking = false;
+
+                if (product.ingredients && product.ingredients.length > 0) {
+                  hasInventoryTracking = true;
+                  product.ingredients.forEach(ing => {
+                    const stockItem = inventory.find(i => i.id === ing.inventoryId);
+                    const stockQty = stockItem ? stockItem.quantity : 0;
+                    const used = usedInventory[ing.inventoryId] || 0;
+                    const avail = Math.max(0, stockQty - used);
+                    const servings = Math.floor(avail / ing.quantity);
+                    if (servings < minServings) minServings = servings;
+                  });
                 }
-                if (product.milkAmount && product.milkAmount > 0) {
-                  milkServings = Math.floor((inventory.milkAmount - usedInventory.milk) / product.milkAmount);
-                }
                 
-                const minServings = Math.min(coffeeServings, milkServings);
-                const isOut = minServings <= 0;
-                const hasInventoryTracking = product.coffeeGrams || product.milkAmount;
+                const isOut = hasInventoryTracking && minServings <= 0;
 
                 return (
                 <motion.div
                   key={product.id}
-                  whileHover={{ y: isOut ? 0 : -8, shadow: isOut ? "none" : "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)" }}
-                  whileTap={{ scale: isOut ? 1 : 0.96 }}
+                  whileHover={{ y: isOut ? 0 : -5, shadow: isOut ? "none" : "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)" }}
+                  whileTap={{ scale: isOut ? 1 : 0.98 }}
                   onClick={() => !isOut && addToCart(product)}
-                  className={`bg-white rounded-[2rem] p-7 border border-gray-50 shadow-sm transition-all group relative overflow-hidden ${isOut ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-hcdc-blue/20 cursor-pointer'}`}
+                  className={`bg-white rounded-3xl p-5 border border-gray-50 shadow-sm transition-all group relative overflow-hidden ${isOut ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:border-hcdc-blue/20 cursor-pointer'}`}
                 >
-                  <div className="flex flex-col items-center text-center gap-4">
-                    <div className="w-20 h-20 rounded-3xl bg-hcdc-light-blue flex items-center justify-center group-hover:bg-white group-hover:scale-110 transition-all duration-300 shadow-inner group-hover:shadow-lg overflow-hidden relative">
+                  <div className="flex flex-col items-center text-center gap-3">
+                    <div className="w-16 h-16 rounded-2xl bg-hcdc-light-blue flex items-center justify-center group-hover:bg-white group-hover:scale-105 transition-all duration-300 shadow-inner group-hover:shadow-md overflow-hidden relative">
                       {product.image ? (
                         <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
                       ) : (
@@ -476,8 +445,8 @@ export default function App() {
                       )}
                     </div>
                     <div>
-                      <h3 className="font-bold text-gray-800 text-sm leading-snug h-12 flex items-center justify-center px-2">{product.name}</h3>
-                      <p className="text-hcdc-red font-black text-xl mt-2 tracking-tight">{formatCurrency(product.price)}</p>
+                      <h3 className="font-bold text-gray-800 text-xs leading-snug h-10 flex items-center justify-center px-1">{product.name}</h3>
+                      <p className="text-hcdc-red font-black text-lg mt-1 tracking-tight">{formatCurrency(product.price)}</p>
                     </div>
                     <div className="px-4 py-1.5 bg-gray-50 group-hover:bg-hcdc-blue group-hover:text-white text-gray-400 rounded-xl text-[10px] font-bold uppercase tracking-[0.1em] transition-colors">
                       {product.category}

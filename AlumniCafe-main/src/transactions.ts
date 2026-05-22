@@ -19,13 +19,14 @@ export interface TransactionRecord {
   total: number;
   cashTendered: number;
   change: number;
+  status?: 'Completed' | 'Voided';
 }
 
 const STORAGE_KEY = 'alumnicafe_transactions';
 
 export function saveTransaction(txn: TransactionRecord): void {
   const existing = getTransactions();
-  existing.push(txn);
+  existing.push({ ...txn, status: txn.status || 'Completed' });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
 }
 
@@ -36,6 +37,21 @@ export function getTransactions(): TransactionRecord[] {
     return JSON.parse(raw) as TransactionRecord[];
   } catch {
     return [];
+  }
+}
+
+export function deleteTransaction(id: string): void {
+  const existing = getTransactions();
+  const filtered = existing.filter(t => t.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+}
+
+export function updateTransaction(id: string, updatedTxn: Partial<TransactionRecord>): void {
+  const existing = getTransactions();
+  const index = existing.findIndex(t => t.id === id);
+  if (index !== -1) {
+    existing[index] = { ...existing[index], ...updatedTxn };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
   }
 }
 

@@ -1,5 +1,10 @@
 // --- Menu Storage (localStorage-based) ---
 
+export interface MenuItemIngredient {
+  inventoryId: string;
+  quantity: number;
+}
+
 export interface MenuItem {
   id: number;
   name: string;
@@ -7,18 +12,19 @@ export interface MenuItem {
   category: string;
   icon: string;
   image?: string; // base64 data URL for uploaded PNG
-  coffeeGrams?: number; // Grams of coffee beans needed
-  milkAmount?: number; // Milk required (ml/pumps)
+  coffeeGrams?: number; // Deprecated
+  milkAmount?: number; // Deprecated
+  ingredients?: MenuItemIngredient[];
 }
 
 const MENU_STORAGE_KEY = 'alumnicafe_menu';
 
 // Default products - used when no custom menu exists in localStorage
 const DEFAULT_PRODUCTS: MenuItem[] = [
-  { id: 1, name: 'Americano', price: 75, category: 'Coffee', icon: '☕', coffeeGrams: 18, milkAmount: 0 },
-  { id: 2, name: 'Café Latte', price: 95, category: 'Coffee', icon: '🥛', coffeeGrams: 18, milkAmount: 150 },
-  { id: 3, name: 'Spanish Latte', price: 115, category: 'Coffee', icon: '☕', coffeeGrams: 18, milkAmount: 180 },
-  { id: 4, name: 'Caramel Macchiato', price: 125, category: 'Coffee', icon: '🍮', coffeeGrams: 18, milkAmount: 160 },
+  { id: 1, name: 'Americano', price: 75, category: 'Coffee', icon: '☕', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }] },
+  { id: 2, name: 'Café Latte', price: 95, category: 'Coffee', icon: '🥛', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }, { inventoryId: 'inv_2', quantity: 150 }] },
+  { id: 3, name: 'Spanish Latte', price: 115, category: 'Coffee', icon: '☕', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }, { inventoryId: 'inv_2', quantity: 180 }] },
+  { id: 4, name: 'Caramel Macchiato', price: 125, category: 'Coffee', icon: '🍮', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }, { inventoryId: 'inv_2', quantity: 160 }] },
 ];
 
 const CATEGORY_STORAGE_KEY = 'alumnicafe_categories';
@@ -63,7 +69,23 @@ export function getMenuItems(): MenuItem[] {
   try {
     const raw = localStorage.getItem(MENU_STORAGE_KEY);
     if (!raw) return [...DEFAULT_PRODUCTS];
-    return JSON.parse(raw) as MenuItem[];
+    let parsed = JSON.parse(raw) as MenuItem[];
+    
+    // Migration for old format
+    parsed = parsed.map(item => {
+      if (item.ingredients === undefined) {
+        const ingredients: MenuItemIngredient[] = [];
+        if (item.coffeeGrams && item.coffeeGrams > 0) {
+          ingredients.push({ inventoryId: 'inv_1', quantity: item.coffeeGrams });
+        }
+        if (item.milkAmount && item.milkAmount > 0) {
+          ingredients.push({ inventoryId: 'inv_2', quantity: item.milkAmount });
+        }
+        return { ...item, ingredients };
+      }
+      return item;
+    });
+    return parsed;
   } catch {
     return [...DEFAULT_PRODUCTS];
   }
