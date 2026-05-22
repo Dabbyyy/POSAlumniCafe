@@ -75,6 +75,7 @@ export default function AdminDashboard() {
 
   // Report state
   const [reportDateFilter, setReportDateFilter] = useState('');
+  const [reportShiftFilter, setReportShiftFilter] = useState('All');
 
   // Inventory state
   const [inventory, setInventory] = useState<Inventory>({ coffeeBeansGrams: 0, milkAmount: 0 });
@@ -456,6 +457,25 @@ export default function AdminDashboard() {
   if (reportDateFilter) {
     filteredReports = filteredReports.filter(t => t.date.startsWith(reportDateFilter));
   }
+  
+  if (reportShiftFilter !== 'All') {
+    filteredReports = filteredReports.filter(t => {
+      const d = new Date(t.date);
+      const hour = d.getHours();
+      const minutes = d.getMinutes();
+      const totalMinutes = hour * 60 + minutes;
+      
+      if (reportShiftFilter === 'Shift 1') {
+        return totalMinutes >= 420 && totalMinutes < 760; // 7:00 AM - 12:40 PM
+      } else if (reportShiftFilter === 'Shift 2') {
+        return totalMinutes >= 760 && totalMinutes < 1100; // 12:40 PM - 6:20 PM
+      } else if (reportShiftFilter === 'Shift 3') {
+        return totalMinutes >= 1100 || totalMinutes < 420; // 6:20 PM - 12:00 MN
+      }
+      return true;
+    });
+  }
+  
   const sortedTransactions = [...filteredReports].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totalCashiersCount = cashiers.length;
@@ -784,6 +804,22 @@ export default function AdminDashboard() {
                         <X className="w-4 h-4" />
                       </button>
                     )}
+                  </div>
+                  
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Clock className="w-4 h-4 text-gray-400" />
+                    </div>
+                    <select
+                      value={reportShiftFilter}
+                      onChange={(e) => setReportShiftFilter(e.target.value)}
+                      className="bg-white border-2 border-gray-100 text-gray-600 pl-10 pr-8 py-2 rounded-xl font-bold text-sm focus:border-hcdc-blue focus:ring-0 transition-colors shadow-sm outline-none appearance-none"
+                    >
+                      <option value="All">All Shifts</option>
+                      <option value="Shift 1">Shift 1 (7:00 AM - 12:40 PM)</option>
+                      <option value="Shift 2">Shift 2 (12:40 PM - 6:20 PM)</option>
+                      <option value="Shift 3">Shift 3 (6:20 PM - 12:00 MN)</option>
+                    </select>
                   </div>
                   <button
                     onClick={exportCSV}
