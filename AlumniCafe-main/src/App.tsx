@@ -58,7 +58,9 @@ export default function App() {
       // Migrate legacy staff name to current cashier name
       const name = localStorage.getItem('cashier_name');
       if (name) {
-        updateCashierNames('Staff 01', name);
+        (async () => {
+          await updateCashierNames('Staff 01', name);
+        })();
       }
     }
   }, [navigate]);
@@ -91,17 +93,29 @@ export default function App() {
 
   // --- Effects ---
   useEffect(() => {
-    setProducts(getMenuItems());
-    setCategories(getMenuCategories());
-    setInventory(getInventory());
+    let isMounted = true;
+    const loadData = async () => {
+      const [p, c, i] = await Promise.all([
+        getMenuItems(),
+        getMenuCategories(),
+        getInventory()
+      ]);
+      if (isMounted) {
+        setProducts(p);
+        setCategories(c);
+        setInventory(i);
+      }
+    };
+    loadData();
+
     const timer = setInterval(() => setTime(new Date()), 1000);
     // Refresh menu items periodically in case admin changes them
-    const refresh = setInterval(() => {
-      setProducts(getMenuItems());
-      setCategories(getMenuCategories());
-      setInventory(getInventory());
-    }, 2000);
-    return () => { clearInterval(timer); clearInterval(refresh); };
+    const refresh = setInterval(loadData, 2000);
+    return () => { 
+      isMounted = false;
+      clearInterval(timer); 
+      clearInterval(refresh); 
+    };
   }, []);
 
   useEffect(() => {
@@ -210,7 +224,7 @@ export default function App() {
     }
   };
 
-  const processPayment = () => {
+  const processPayment = async () => {
     if (cart.length === 0) {
       alert('Your cart is empty!');
       return;
@@ -223,7 +237,7 @@ export default function App() {
 
     // Save transaction to local database
     const now = new Date();
-    saveTransaction({
+    await saveTransaction({
       id: txnNumber,
       date: now.toISOString(),
       time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }),
@@ -249,7 +263,7 @@ export default function App() {
       const used = usedInventory[stock.id] || 0;
       return { ...stock, quantity: Math.max(0, stock.quantity - used) };
     });
-    saveInventory(newInventory);
+    await saveInventory(newInventory);
     setInventory(newInventory);
 
     setShowReceipt(true);

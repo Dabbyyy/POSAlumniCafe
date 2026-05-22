@@ -1,4 +1,5 @@
-// --- Menu Storage (localStorage-based) ---
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface MenuItemIngredient {
   inventoryId: string;
@@ -11,15 +12,15 @@ export interface MenuItem {
   price: number;
   category: string;
   icon: string;
-  image?: string; // base64 data URL for uploaded PNG
-  coffeeGrams?: number; // Deprecated
-  milkAmount?: number; // Deprecated
+  image?: string; 
+  coffeeGrams?: number; 
+  milkAmount?: number; 
   ingredients?: MenuItemIngredient[];
 }
 
-const MENU_STORAGE_KEY = 'alumnicafe_menu';
+const MENU_COLLECTION = 'menu';
+const CATEGORY_COLLECTION = 'categories';
 
-// Default products - used when no custom menu exists in localStorage
 const DEFAULT_PRODUCTS: MenuItem[] = [
   { id: 1, name: 'Americano', price: 75, category: 'Coffee', icon: '☕', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }] },
   { id: 2, name: 'Café Latte', price: 95, category: 'Coffee', icon: '🥛', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }, { inventoryId: 'inv_2', quantity: 150 }] },
@@ -27,93 +28,85 @@ const DEFAULT_PRODUCTS: MenuItem[] = [
   { id: 4, name: 'Caramel Macchiato', price: 125, category: 'Coffee', icon: '🍮', ingredients: [{ inventoryId: 'inv_1', quantity: 18 }, { inventoryId: 'inv_2', quantity: 160 }] },
 ];
 
-const CATEGORY_STORAGE_KEY = 'alumnicafe_categories';
+const DEFAULT_CATEGORIES = ['Coffee'];
 
-const DEFAULT_CATEGORIES = [
-  'Coffee'
-];
-
-export function getMenuCategories(): string[] {
+export async function getMenuCategories(): Promise<string[]> {
   try {
-    const raw = localStorage.getItem(CATEGORY_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_CATEGORIES];
-    return JSON.parse(raw) as string[];
-  } catch {
+    const querySnapshot = await getDocs(collection(db, CATEGORY_COLLECTION));
+    if (querySnapshot.empty) {
+      for (const cat of DEFAULT_CATEGORIES) {
+        await setDoc(doc(db, CATEGORY_COLLECTION, cat), { name: cat });
+      }
+      return [...DEFAULT_CATEGORIES];
+    }
+    const categories: string[] = [];
+    querySnapshot.forEach((docSnap) => {
+      categories.push(docSnap.id);
+    });
+    return categories;
+  } catch (error) {
+    console.error("Error fetching categories:", error);
     return [...DEFAULT_CATEGORIES];
   }
 }
 
-export function saveMenuCategories(cats: string[]): void {
-  localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(cats));
-}
-
-export function addMenuCategory(cat: string): string[] {
-  const cats = getMenuCategories();
-  if (!cats.includes(cat)) {
-    cats.push(cat);
-    saveMenuCategories(cats);
+export async function saveMenuCategories(cats: string[]): Promise<void> {
+  for (const cat of cats) {
+    await setDoc(doc(db, CATEGORY_COLLECTION, cat), { name: cat });
   }
-  return cats;
 }
 
-export function deleteMenuCategory(cat: string): string[] {
-  const cats = getMenuCategories().filter(c => c !== cat);
-  saveMenuCategories(cats);
-  
-  // Also clean up items in that category? 
-  // For now let's just delete the category name from the list.
-  return cats;
+export async function addMenuCategory(cat: string): Promise<string[]> {
+  await setDoc(doc(db, CATEGORY_COLLECTION, cat), { name: cat });
+  return await getMenuCategories();
 }
 
-export function getMenuItems(): MenuItem[] {
+export async function deleteMenuCategory(cat: string): Promise<string[]> {
+  await deleteDoc(doc(db, CATEGORY_COLLECTION, cat));
+  return await getMenuCategories();
+}
+
+export async function getMenuItems(): Promise<MenuItem[]> {
   try {
-    const raw = localStorage.getItem(MENU_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_PRODUCTS];
-    let parsed = JSON.parse(raw) as MenuItem[];
-    
-    // Migration for old format
-    parsed = parsed.map(item => {
-      if (item.ingredients === undefined) {
-        const ingredients: MenuItemIngredient[] = [];
-        if (item.coffeeGrams && item.coffeeGrams > 0) {
-          ingredients.push({ inventoryId: 'inv_1', quantity: item.coffeeGrams });
-        }
-        if (item.milkAmount && item.milkAmount > 0) {
-          ingredients.push({ inventoryId: 'inv_2', quantity: item.milkAmount });
-        }
-        return { ...item, ingredients };
+    const querySnapshot = await getDocs(collection(db, MENU_COLLECTION));
+    if (querySnapshot.empty) {
+      for (const item of DEFAULT_PRODUCTS) {
+        await setDoc(doc(db, MENU_COLLECTION, item.id.toString()), item);
       }
-      return item;
+      return [...DEFAULT_PRODUCTS];
+    }
+    const items: MenuItem[] = [];
+    querySnapshot.forEach((docSnap) => {
+      items.push(docSnap.data() as MenuItem);
     });
-    return parsed;
-  } catch {
+    return items.sort((a, b) => a.id - b.id);
+  } catch (error) {
+    console.error("Error fetching menu items:", error);
     return [...DEFAULT_PRODUCTS];
   }
 }
 
-export function saveMenuItems(items: MenuItem[]): void {
-  localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(items));
+export async function saveMenuItems(items: MenuItem[]): Promise<void> {
+  for (const item of items) {
+    await setDoc(doc(db, MENU_COLLECTION, item.id.toString()), item);
+  }
 }
 
-export function addMenuItem(item: Omit<MenuItem, 'id'>): MenuItem[] {
-  const items = getMenuItems();
-  const newId = items.length > 0 ? Math.max(...items.map(i => i.id)) + 1 : 1;
+export async function addMenuItem(item: Omit<MenuItem, 'id'>): Promise<MenuItem[]> {
+  const currentItems = await getMenuItems();
+  const newId = currentItems.length > 0 ? Math.max(...currentItems.map(i => i.id)) + 1 : 1;
   const newItem = { ...item, id: newId };
-  items.push(newItem);
-  saveMenuItems(items);
-  return items;
+  
+  await setDoc(doc(db, MENU_COLLECTION, newId.toString()), newItem);
+  return await getMenuItems();
 }
 
-export function updateMenuItem(id: number, updates: Partial<MenuItem>): MenuItem[] {
-  const items = getMenuItems().map(item =>
-    item.id === id ? { ...item, ...updates } : item
-  );
-  saveMenuItems(items);
-  return items;
+export async function updateMenuItem(id: number, updates: Partial<MenuItem>): Promise<MenuItem[]> {
+  await updateDoc(doc(db, MENU_COLLECTION, id.toString()), updates as any);
+  return await getMenuItems();
 }
 
-export function deleteMenuItem(id: number): MenuItem[] {
-  const items = getMenuItems().filter(item => item.id !== id);
-  saveMenuItems(items);
-  return items;
+export async function deleteMenuItem(id: number): Promise<MenuItem[]> {
+  await deleteDoc(doc(db, MENU_COLLECTION, id.toString()));
+  return await getMenuItems();
 }

@@ -9,12 +9,12 @@ export default function Login() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
     // Authentication checking if username and password match a cashier in storage
-    const cashiers = getCashiers();
+    const cashiers = await getCashiers();
     const cashier = cashiers.find(c => c.username === username);
 
     if (cashier && (cashier.password === password || (!cashier.password && password === '12345'))) {
@@ -22,7 +22,7 @@ export default function Login() {
       localStorage.setItem('cashier_name', cashier.name);
       localStorage.setItem('cashier_id', cashier.id.toString());
       localStorage.setItem('cashier_role', cashier.role);
-      recordCashierLogin(cashier.id);
+      await recordCashierLogin(cashier.id);
       navigate('/');
     } else {
       setError('Invalid username or password');

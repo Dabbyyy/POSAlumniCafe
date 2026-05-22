@@ -1,4 +1,5 @@
-// --- Cashier Storage (localStorage-based) ---
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface CashierAccount {
   id: number;
@@ -9,7 +10,7 @@ export interface CashierAccount {
   lastLogin?: string;
 }
 
-const CASHIER_STORAGE_KEY = 'alumnicafe_cashiers';
+const COLLECTION_NAME = 'cashiers';
 
 const DEFAULT_CASHIERS: CashierAccount[] = [
   { id: 1, name: 'Juan Dela Cruz', username: 'juan@alumnicafe', role: 'Senior Cashier', password: '12345' },
@@ -17,46 +18,51 @@ const DEFAULT_CASHIERS: CashierAccount[] = [
   { id: 3, name: 'Pedro Reyes', username: 'pedro@alumnicafe', role: 'Cashier', password: '12345' },
 ];
 
-export function getCashiers(): CashierAccount[] {
+export async function getCashiers(): Promise<CashierAccount[]> {
   try {
-    const raw = localStorage.getItem(CASHIER_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_CASHIERS];
-    return JSON.parse(raw) as CashierAccount[];
-  } catch {
-    return [...DEFAULT_CASHIERS];
+    const querySnapshot = await getDocs(collection(db, COLLECTION_NAME));
+    if (querySnapshot.empty) {
+      // Initialize with default cashiers if empty
+      for (const cashier of DEFAULT_CASHIERS) {
+        await setDoc(doc(db, COLLECTION_NAME, cashier.id.toString()), cashier);
+      }
+      return [...DEFAULT_CASHIERS];
+    }
+    const cashiers: CashierAccount[] = [];
+    querySnapshot.forEach((docSnap) => {
+      cashiers.push(docSnap.data() as CashierAccount);
+    });
+    return cashiers.sort((a, b) => a.id - b.id);
+  } catch (error) {
+    console.error("Error fetching cashiers: ", error);
+    return [...DEFAULT_CASHIERS]; // fallback
   }
 }
 
-export function saveCashiers(items: CashierAccount[]): void {
-  localStorage.setItem(CASHIER_STORAGE_KEY, JSON.stringify(items));
-}
-
-export function addCashier(item: Omit<CashierAccount, 'id'>): CashierAccount[] {
-  const items = getCashiers();
-  const newId = items.length > 0 ? Math.max(...items.map(i => i.id)) + 1 : 1;
+export async function addCashier(item: Omit<CashierAccount, 'id'>): Promise<CashierAccount[]> {
+  const currentCashiers = await getCashiers();
+  const newId = currentCashiers.length > 0 ? Math.max(...currentCashiers.map(i => i.id)) + 1 : 1;
   const newItem = { ...item, id: newId, password: item.password ?? '12345' };
-  items.push(newItem);
-  saveCashiers(items);
-  return items;
+  
+  await setDoc(doc(db, COLLECTION_NAME, newId.toString()), newItem);
+  return await getCashiers();
 }
 
-export function updateCashier(id: number, updates: Partial<CashierAccount>): CashierAccount[] {
-  const items = getCashiers().map(item =>
-    item.id === id ? { ...item, ...updates } : item
-  );
-  saveCashiers(items);
-  return items;
+export async function updateCashier(id: number, updates: Partial<CashierAccount>): Promise<CashierAccount[]> {
+  const docRef = doc(db, COLLECTION_NAME, id.toString());
+  await updateDoc(docRef, updates as any);
+  return await getCashiers();
 }
 
-export function deleteCashier(id: number): CashierAccount[] {
-  const items = getCashiers().filter(item => item.id !== id);
-  saveCashiers(items);
-  return items;
+export async function deleteCashier(id: number): Promise<CashierAccount[]> {
+  const docRef = doc(db, COLLECTION_NAME, id.toString());
+  await deleteDoc(docRef);
+  return await getCashiers();
 }
 
-export function recordCashierLogin(id: number): void {
+export async function recordCashierLogin(id: number): Promise<void> {
   const now = new Date();
-  updateCashier(id, { 
+  await updateCashier(id, { 
     lastLogin: now.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + 
                now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true })
   });

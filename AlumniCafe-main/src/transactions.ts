@@ -1,4 +1,5 @@
-// --- Transaction Storage (localStorage-based) ---
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface TransactionRecord {
   id: string;
@@ -22,59 +23,60 @@ export interface TransactionRecord {
   status?: 'Completed' | 'Voided';
 }
 
-const STORAGE_KEY = 'alumnicafe_transactions';
+const TRANSACTIONS_COLLECTION = 'transactions';
 
-export function saveTransaction(txn: TransactionRecord): void {
-  const existing = getTransactions();
-  existing.push({ ...txn, status: txn.status || 'Completed' });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+export async function saveTransaction(txn: TransactionRecord): Promise<void> {
+  const finalTxn = { ...txn, status: txn.status || 'Completed' };
+  await setDoc(doc(db, TRANSACTIONS_COLLECTION, finalTxn.id), finalTxn);
 }
 
-export function getTransactions(): TransactionRecord[] {
+export async function getTransactions(): Promise<TransactionRecord[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as TransactionRecord[];
-  } catch {
+    const querySnapshot = await getDocs(collection(db, TRANSACTIONS_COLLECTION));
+    const transactions: TransactionRecord[] = [];
+    querySnapshot.forEach((docSnap) => {
+      transactions.push(docSnap.data() as TransactionRecord);
+    });
+    // Sort descending by date
+    return transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  } catch (error) {
+    console.error("Error fetching transactions: ", error);
     return [];
   }
 }
 
-export function deleteTransaction(id: string): void {
-  const existing = getTransactions();
-  const filtered = existing.filter(t => t.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+export async function deleteTransaction(id: string): Promise<void> {
+  await deleteDoc(doc(db, TRANSACTIONS_COLLECTION, id));
 }
 
-export function updateTransaction(id: string, updatedTxn: Partial<TransactionRecord>): void {
-  const existing = getTransactions();
-  const index = existing.findIndex(t => t.id === id);
-  if (index !== -1) {
-    existing[index] = { ...existing[index], ...updatedTxn };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
+export async function updateTransaction(id: string, updatedTxn: Partial<TransactionRecord>): Promise<void> {
+  await updateDoc(doc(db, TRANSACTIONS_COLLECTION, id), updatedTxn as any);
+}
+
+export async function getTransactionsForDate(dateStr: string): Promise<TransactionRecord[]> {
+  try {
+    const all = await getTransactions();
+    return all.filter(t => t.date.startsWith(dateStr));
+  } catch (error) {
+    console.error("Error fetching transactions for date: ", error);
+    return [];
   }
 }
 
-export function getTransactionsForDate(dateStr: string): TransactionRecord[] {
-  return getTransactions().filter(t => t.date.startsWith(dateStr));
-}
-
-export function getTodayTransactions(): TransactionRecord[] {
+export async function getTodayTransactions(): Promise<TransactionRecord[]> {
   const today = new Date().toISOString().slice(0, 10);
-  return getTransactionsForDate(today);
+  return await getTransactionsForDate(today);
 }
 
-export function updateCashierNames(oldName: string, newName: string): void {
-  const txns = getTransactions();
-  let changed = false;
-  const updated = txns.map(t => {
-    if (t.cashier === oldName) {
-      changed = true;
-      return { ...t, cashier: newName };
+export async function updateCashierNames(oldName: string, newName: string): Promise<void> {
+  try {
+    const q = query(collection(db, TRANSACTIONS_COLLECTION), where("cashier", "==", oldName));
+    const querySnapshot = await getDocs(q);
+    
+    for (const document of querySnapshot.docs) {
+      await updateDoc(doc(db, TRANSACTIONS_COLLECTION, document.id), { cashier: newName });
     }
-    return t;
-  });
-  if (changed) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  } catch (error) {
+    console.error("Error updating cashier names in transactions: ", error);
   }
 }

@@ -106,22 +106,34 @@ export default function AdminDashboard() {
   const VAT_RATE = 0.12;
 
   useEffect(() => {
-    setMenuItems(getMenuItems());
-    setTransactions(getTransactions());
-    setCashiers(getCashiers());
-    setCategories(getMenuCategories());
-    setInventory(getInventory());
-    setInventoryLogs(getInventoryLogs());
+    let isMounted = true;
+    const loadData = async () => {
+      const [m, t, c, cat, i, l] = await Promise.all([
+        getMenuItems(),
+        getTransactions(),
+        getCashiers(),
+        getMenuCategories(),
+        getInventory(),
+        getInventoryLogs()
+      ]);
+      if (isMounted) {
+        setMenuItems(m);
+        setTransactions(t);
+        setCashiers(c);
+        setCategories(cat);
+        setInventory(i);
+        setInventoryLogs(l);
+      }
+    };
+    loadData();
+
     const timer = setInterval(() => setTime(new Date()), 1000);
-    const refresh = setInterval(() => {
-      setMenuItems(getMenuItems());
-      setTransactions(getTransactions());
-      setCashiers(getCashiers());
-      setCategories(getMenuCategories());
-      setInventory(getInventory());
-      setInventoryLogs(getInventoryLogs());
-    }, 2000);
-    return () => { clearInterval(timer); clearInterval(refresh); };
+    const refresh = setInterval(loadData, 2000);
+    return () => { 
+      isMounted = false;
+      clearInterval(timer); 
+      clearInterval(refresh); 
+    };
   }, []);
 
   // --- Inventory edit/delete handlers ---
@@ -133,13 +145,13 @@ export default function AdminDashboard() {
     setShowInvAuthModal(true);
   };
 
-  const handleInvAuthSubmit = () => {
+  const handleInvAuthSubmit = async () => {
     if (invAuthPassword === 'alumnicafe') {
       setShowInvAuthModal(false);
       setInvAuthError(false);
       if (invAuthAction === 'delete' && invAuthTarget) {
         const updated = inventory.filter(i => i.id !== invAuthTarget);
-        saveInventory(updated);
+        await saveInventory(updated);
         setInventory(updated);
       } else if (invAuthAction === 'edit' && invAuthTarget) {
         const item = inventory.find(i => i.id === invAuthTarget);
@@ -157,7 +169,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSaveInvEdit = () => {
+  const handleSaveInvEdit = async () => {
     if (!editingInvItem) return;
     const newQty = parseFloat(editingInvItem.quantity) || 0;
     const updated = inventory.map(i =>
@@ -165,20 +177,20 @@ export default function AdminDashboard() {
         ? { ...i, name: editingInvItem.name.trim(), quantity: newQty, unit: editingInvItem.unit as 'g' | 'ml' }
         : i
     );
-    saveInventory(updated);
+    await saveInventory(updated);
     setInventory(updated);
     setShowInvEditModal(false);
     setEditingInvItem(null);
   };
 
   // Menu handlers
-  const handleAddInventory = () => {
+  const handleAddInventory = async () => {
     const qty = parseFloat(addInventoryForm.quantity) || 0;
     const name = addInventoryForm.name.trim();
     
     if (qty > 0 && name) {
       const now = new Date();
-      const newLogs = addInventoryLog({
+      const newLogs = await addInventoryLog({
         date: now.toISOString(),
         time: now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }),
         stockName: name,
@@ -195,7 +207,7 @@ export default function AdminDashboard() {
         const newId = `inv_${Date.now()}`;
         updated = [...inventory, { id: newId, name, quantity: qty, unit: addInventoryForm.unit as 'g'|'ml' }];
       }
-      saveInventory(updated);
+      await saveInventory(updated);
       setInventory(updated);
       setAddInventoryForm({ name: '', quantity: '', unit: 'g' });
     }
@@ -211,9 +223,9 @@ export default function AdminDashboard() {
     reader.readAsDataURL(file);
   };
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!formData.name || !formData.price) return;
-    const updated = addMenuItem({
+    const updated = await addMenuItem({
       name: formData.name,
       price: parseFloat(formData.price),
       category: formData.category,
@@ -226,9 +238,9 @@ export default function AdminDashboard() {
     setShowAddModal(false);
   };
 
-  const handleEditItem = () => {
+  const handleEditItem = async () => {
     if (!editingItem || !formData.name || !formData.price) return;
-    const updated = updateMenuItem(editingItem.id, {
+    const updated = await updateMenuItem(editingItem.id, {
       name: formData.name,
       price: parseFloat(formData.price),
       category: formData.category,
@@ -246,13 +258,13 @@ export default function AdminDashboard() {
     setShowDeleteConfirm(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     if (itemToDelete.type === 'menu') {
-      const updated = deleteMenuItem(itemToDelete.id);
+      const updated = await deleteMenuItem(itemToDelete.id);
       setMenuItems(updated);
     } else {
-      setCashiers(deleteCashier(itemToDelete.id));
+      setCashiers(await deleteCashier(itemToDelete.id));
     }
     setShowDeleteConfirm(false);
     setItemToDelete(null);
@@ -270,26 +282,26 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleAddCat = () => {
+  const handleAddCat = async () => {
     if (!newCategoryName.trim()) return;
-    setCategories(addMenuCategory(newCategoryName.trim()));
+    setCategories(await addMenuCategory(newCategoryName.trim()));
     setNewCategoryName('');
   };
 
-  const handleDeleteCat = (cat: string) => {
+  const handleDeleteCat = async (cat: string) => {
     if (confirm(`Are you sure you want to delete the "${cat}" category?`)) {
-      setCategories(deleteMenuCategory(cat));
+      setCategories(await deleteMenuCategory(cat));
       if (menuCategoryFilter === cat) setMenuCategoryFilter('All');
     }
   };
 
-  const handleSaveCashier = () => {
+  const handleSaveCashier = async () => {
     if (!cashierForm.name || !cashierForm.usernamePrefix) return;
     const fullUsername = `${cashierForm.usernamePrefix}@alumnicafe`;
     if (editingCashier) {
-      setCashiers(updateCashier(editingCashier.id, { name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
+      setCashiers(await updateCashier(editingCashier.id, { name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
     } else {
-      setCashiers(addCashier({ name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
+      setCashiers(await addCashier({ name: cashierForm.name, username: fullUsername, role: cashierForm.role }));
     }
     setShowCashierModal(false);
     setEditingCashier(null);
@@ -318,16 +330,16 @@ export default function AdminDashboard() {
     setShowAdminAuthModal(true);
   };
 
-  const handleAdminAuthSubmit = () => {
+  const handleAdminAuthSubmit = async () => {
     if (adminPasswordInput === 'alumnicafe') {
       if (!authCallback) return;
       
       if (authCallback.type === 'void') {
-        updateTransaction(authCallback.txn.id, { status: 'Voided' });
-        setTransactions(getTransactions());
+        await updateTransaction(authCallback.txn.id, { status: 'Voided' });
+        setTransactions(await getTransactions());
       } else if (authCallback.type === 'delete') {
-        deleteTransaction(authCallback.txn.id);
-        setTransactions(getTransactions());
+        await deleteTransaction(authCallback.txn.id);
+        setTransactions(await getTransactions());
       } else if (authCallback.type === 'edit') {
         setEditingTransaction(authCallback.txn);
         setEditTxnForm({ 
@@ -349,16 +361,16 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSaveEditTransaction = () => {
+  const handleSaveEditTransaction = async () => {
     if (!editingTransaction) return;
-    updateTransaction(editingTransaction.id, { 
+    await updateTransaction(editingTransaction.id, { 
       total: editTxnForm.total, 
       subtotal: editTxnForm.subtotal,
       discountAmount: editTxnForm.discountAmount,
       vatAmount: editTxnForm.vatAmount,
       items: editTxnForm.items
     });
-    setTransactions(getTransactions());
+    setTransactions(await getTransactions());
     setEditingTransaction(null);
   };
 
