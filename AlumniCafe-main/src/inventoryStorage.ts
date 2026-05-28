@@ -8,7 +8,7 @@ export interface InventoryItem {
   id: string;
   name: string;
   quantity: number;
-  unit: 'g' | 'ml';
+  unit: 'g' | 'ml' | 'pcs';
 }
 
 export type Inventory = InventoryItem[];

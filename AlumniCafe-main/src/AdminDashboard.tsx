@@ -146,7 +146,7 @@ export default function AdminDashboard() {
   };
 
   const handleInvAuthSubmit = async () => {
-    if (invAuthPassword === 'alumnicafe') {
+    if (invAuthPassword === 'alumnicafeadmin') {
       setShowInvAuthModal(false);
       setInvAuthError(false);
       if (invAuthAction === 'delete' && invAuthTarget) {
@@ -174,7 +174,7 @@ export default function AdminDashboard() {
     const newQty = parseFloat(editingInvItem.quantity) || 0;
     const updated = inventory.map(i =>
       i.id === editingInvItem.id
-        ? { ...i, name: editingInvItem.name.trim(), quantity: newQty, unit: editingInvItem.unit as 'g' | 'ml' }
+        ? { ...i, name: editingInvItem.name.trim(), quantity: newQty, unit: editingInvItem.unit as 'g' | 'ml' | 'pcs' }
         : i
     );
     await saveInventory(updated);
@@ -205,7 +205,7 @@ export default function AdminDashboard() {
         updated = inventory.map(i => i.id === existingItem.id ? { ...i, quantity: i.quantity + qty } : i);
       } else {
         const newId = `inv_${Date.now()}`;
-        updated = [...inventory, { id: newId, name, quantity: qty, unit: addInventoryForm.unit as 'g'|'ml' }];
+        updated = [...inventory, { id: newId, name, quantity: qty, unit: addInventoryForm.unit as 'g'|'ml'|'pcs' }];
       }
       await saveInventory(updated);
       setInventory(updated);
@@ -331,7 +331,7 @@ export default function AdminDashboard() {
   };
 
   const handleAdminAuthSubmit = async () => {
-    if (adminPasswordInput === 'alumnicafe') {
+    if (adminPasswordInput === 'alumnicafeadmin') {
       if (!authCallback) return;
       
       if (authCallback.type === 'void') {
@@ -1207,7 +1207,7 @@ export default function AdminDashboard() {
                         <div key={stock.id} className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl group hover:bg-white hover:shadow-md border-2 border-transparent hover:border-gray-100 transition-all">
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-gray-700 truncate">{stock.name}</p>
-                            <p className="text-xs text-gray-400 font-medium">{stock.unit === 'g' ? 'Grams' : 'Millilitres'}</p>
+                            <p className="text-xs text-gray-400 font-medium">{stock.unit === 'g' ? 'Grams' : stock.unit === 'ml' ? 'Millilitres' : 'Pieces'}</p>
                           </div>
                           <span className="text-xl font-black text-hcdc-blue tabular-nums shrink-0">
                             {stock.quantity.toLocaleString()} {stock.unit}
@@ -1267,6 +1267,7 @@ export default function AdminDashboard() {
                         >
                           <option value="g">g</option>
                           <option value="ml">ml</option>
+                          <option value="pcs">pcs</option>
                         </select>
                       </div>
                     </div>
@@ -1497,6 +1498,7 @@ export default function AdminDashboard() {
                     >
                       <option value="g">g</option>
                       <option value="ml">ml</option>
+                      <option value="pcs">pcs</option>
                     </select>
                   </div>
                 </div>
