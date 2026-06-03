@@ -30,6 +30,7 @@ import {
   Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import {
   XAxis,
   YAxis,
@@ -42,7 +43,7 @@ import {
 import { getMenuItems, saveMenuItems, addMenuItem, updateMenuItem, deleteMenuItem, MenuItem, getMenuCategories, addMenuCategory, deleteMenuCategory } from './menuStorage';
 import { getTransactions, TransactionRecord, deleteTransaction, updateTransaction } from './transactions';
 import { getCashiers, addCashier, updateCashier, deleteCashier, CashierAccount } from './cashierStorage';
-import { getInventory, saveInventory, Inventory, getInventoryLogs, addInventoryLog, InventoryLog } from './inventoryStorage';
+import { getInventory, saveInventory, deleteInventoryItem, Inventory, getInventoryLogs, addInventoryLog, InventoryLog } from './inventoryStorage';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'analytics' | 'cashiers' | 'reports' | 'menu' | 'inventory'>('analytics');
@@ -73,7 +74,7 @@ export default function AdminDashboard() {
 
   // Confirmation Modals State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<{ id: number; type: 'menu' | 'cashier'; name: string } | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{ id: number | string; type: 'menu' | 'cashier' | 'inventory'; name: string } | null>(null);
 
   // Report state
   const [reportDateFilter, setReportDateFilter] = useState('');
@@ -137,12 +138,20 @@ export default function AdminDashboard() {
   }, []);
 
   // --- Inventory edit/delete handlers ---
-  const initiateInvAuth = (action: 'edit' | 'delete', itemId: string) => {
-    setInvAuthAction(action);
-    setInvAuthTarget(itemId);
-    setInvAuthPassword('');
-    setInvAuthError(false);
-    setShowInvAuthModal(true);
+  const initiateInvAuth = async (action: 'edit' | 'delete', itemId: string) => {
+    if (action === 'delete') {
+      const item = inventory.find(i => i.id === itemId);
+      if (item) {
+        setItemToDelete({ id: item.id, type: 'inventory', name: item.name });
+        setShowDeleteConfirm(true);
+      }
+    } else if (action === 'edit') {
+      const item = inventory.find(i => i.id === itemId);
+      if (item) {
+        setEditingInvItem({ id: item.id, name: item.name, quantity: item.quantity.toString(), unit: item.unit });
+        setShowInvEditModal(true);
+      }
+    }
   };
 
   const handleInvAuthSubmit = async () => {
@@ -261,10 +270,13 @@ export default function AdminDashboard() {
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
     if (itemToDelete.type === 'menu') {
-      const updated = await deleteMenuItem(itemToDelete.id);
+      const updated = await deleteMenuItem(itemToDelete.id as number);
       setMenuItems(updated);
-    } else {
-      setCashiers(await deleteCashier(itemToDelete.id));
+    } else if (itemToDelete.type === 'cashier') {
+      setCashiers(await deleteCashier(itemToDelete.id as number));
+    } else if (itemToDelete.type === 'inventory') {
+      const updated = await deleteInventoryItem(itemToDelete.id as string);
+      setInventory(updated);
     }
     setShowDeleteConfirm(false);
     setItemToDelete(null);
@@ -395,6 +407,131 @@ export default function AdminDashboard() {
       discountAmount: newDiscountAmount,
       vatAmount: newVatAmount
     });
+  };
+  const generateXlsxReport = (data: any[]) => {
+    const cashiersInData = Array.from(new Set(data.filter(t => t.status !== 'Voided').map(t => t.cashier))).sort();
+    const itemStats: Record<string, { price: number, cashiers: Record<string, { qty: number, amnt: number }> }> = {};
+    
+    data.forEach(txn => {
+      if (txn.status === 'Voided') return;
+      txn.items.forEach((item: any) => {
+        if (!itemStats[item.name]) {
+          itemStats[item.name] = { price: item.price, cashiers: {} };
+        }
+        if (!itemStats[item.name].cashiers[txn.cashier]) {
+          itemStats[item.name].cashiers[txn.cashier] = { qty: 0, amnt: 0 };
+        }
+        itemStats[item.name].cashiers[txn.cashier].qty += item.quantity;
+        itemStats[item.name].cashiers[txn.cashier].amnt += (item.quantity * item.price);
+      });
+    });
+
+    const itemNames = Object.keys(itemStats).sort();
+
+    const rows: any[][] = [];
+    rows.push(['Holy Cross of Davao College']);
+    rows.push(['Center for Social Communications and Alumni Affairs']);
+    rows.push(['Sta. Ana Avenue, corner C. de Guzman St., Davao City']);
+    rows.push([]);
+    rows.push(['DAILY SALES REPORT']);
+    rows.push(['HCDC Cross Blazers Café']);
+    rows.push([]);
+
+    const startRow = 7;
+    const dateStr = reportDateFilter 
+      ? new Date(reportDateFilter).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-') 
+      : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+    
+    const hr1 = ['Café Item', 'Price', dateStr];
+    for (let i = 0; i < cashiersInData.length * 2 - 1; i++) hr1.push('');
+    hr1.push('Total Qty and Sales', '');
+    rows.push(hr1);
+
+    const hr2 = ['', ''];
+    cashiersInData.forEach(c => { hr2.push(c, ''); });
+    hr2.push('', '');
+    rows.push(hr2);
+
+    const hr3 = ['', ''];
+    cashiersInData.forEach(() => { hr3.push('Qty', 'Amnt'); });
+    hr3.push('Qty', 'Amnt');
+    rows.push(hr3);
+
+    let grandTotalQty = 0;
+    let grandTotalAmnt = 0;
+    const cashierTotals: Record<string, {qty: number, amnt: number}> = {};
+    cashiersInData.forEach(c => cashierTotals[c] = {qty: 0, amnt: 0});
+
+    itemNames.forEach(itemName => {
+      const stats = itemStats[itemName];
+      const row = [itemName, stats.price];
+      let itemTotalQty = 0;
+      let itemTotalAmnt = 0;
+
+      cashiersInData.forEach(c => {
+        const cStats = stats.cashiers[c] || { qty: 0, amnt: 0 };
+        row.push(cStats.qty || 0);
+        row.push(cStats.amnt || 0);
+        itemTotalQty += cStats.qty;
+        itemTotalAmnt += cStats.amnt;
+        cashierTotals[c].qty += cStats.qty;
+        cashierTotals[c].amnt += cStats.amnt;
+      });
+
+      row.push(itemTotalQty);
+      row.push(itemTotalAmnt);
+      grandTotalQty += itemTotalQty;
+      grandTotalAmnt += itemTotalAmnt;
+      rows.push(row);
+    });
+
+    const totalRow: any[] = ['', ''];
+    cashiersInData.forEach(c => {
+      totalRow.push(cashierTotals[c].qty);
+      totalRow.push(cashierTotals[c].amnt);
+    });
+    totalRow.push(grandTotalQty);
+    totalRow.push(grandTotalAmnt);
+    rows.push(totalRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    const merges = [
+      { s: { r: startRow, c: 0 }, e: { r: startRow + 2, c: 0 } },
+      { s: { r: startRow, c: 1 }, e: { r: startRow + 2, c: 1 } },
+      { s: { r: startRow, c: 2 }, e: { r: startRow, c: 1 + cashiersInData.length * 2 } },
+      { s: { r: startRow, c: 2 + cashiersInData.length * 2 }, e: { r: startRow + 1, c: 3 + cashiersInData.length * 2 } }
+    ];
+
+    cashiersInData.forEach((c, i) => {
+      merges.push({ s: { r: startRow + 1, c: 2 + i * 2 }, e: { r: startRow + 1, c: 3 + i * 2 } });
+    });
+    ws['!merges'] = merges;
+
+    const wscols = [{ wch: 25 }, { wch: 10 }];
+    for (let i = 0; i < cashiersInData.length * 2; i++) wscols.push({ wch: 12 });
+    wscols.push({ wch: 12 }, { wch: 12 });
+    ws['!cols'] = wscols;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sales Report");
+    XLSX.writeFile(wb, `AlumniCafe_Sales_${dateStr}.xlsx`);
+  };
+
+  const generateCsvReport = (data: Record<string, any>[]) => {
+    console.log("Generating CSV report...", data);
+    // Implementation for CSV generation goes here
+  };
+
+  const handleReportExport = (
+    reportType: 'daily' | 'weekly' | 'monthly',
+    reportData: Record<string, any>[]
+  ): void => {
+    if (reportType === 'daily' || reportType === 'weekly') {
+      generateXlsxReport(reportData);
+    } else if (reportType === 'monthly') {
+      generateCsvReport(reportData);
+    }
   };
 
   const exportCSV = () => {
@@ -1024,11 +1161,11 @@ export default function AdminDashboard() {
                     </select>
                   </div>
                   <button
-                    onClick={exportCSV}
+                    onClick={() => handleReportExport('daily', sortedTransactions)}
                     disabled={sortedTransactions.length === 0}
                     className="bg-hcdc-blue text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-hcdc-blue-dark transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Download className="w-4 h-4" /> Export CSV
+                    <Download className="w-4 h-4" /> Export XLSX
                   </button>
                 </div>
               </div>
@@ -2035,7 +2172,7 @@ export default function AdminDashboard() {
               <div className="w-20 h-20 bg-hcdc-light-red rounded-full flex items-center justify-center mx-auto mb-6 text-hcdc-red">
                 <Trash2 className="w-10 h-10" />
               </div>
-              <h3 className="text-xl font-black mb-2">Delete {itemToDelete.type === 'menu' ? 'Menu Item' : 'Cashier'}?</h3>
+              <h3 className="text-xl font-black mb-2">Delete {itemToDelete.type === 'menu' ? 'Menu Item' : itemToDelete.type === 'cashier' ? 'Cashier' : 'Ingredient'}?</h3>
               <p className="text-sm text-gray-500 mb-8">
                 Are you sure you want to remove <span className="font-bold text-gray-800">{itemToDelete.name}</span>? This action cannot be undone.
               </p>

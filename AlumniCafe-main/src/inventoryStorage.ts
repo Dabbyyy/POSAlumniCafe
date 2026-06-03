@@ -1,4 +1,4 @@
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 const INVENTORY_COLLECTION = 'inventory';
@@ -42,6 +42,11 @@ export async function saveInventory(inv: Inventory): Promise<void> {
   for (const item of inv) {
     await setDoc(doc(db, INVENTORY_COLLECTION, item.id), item);
   }
+}
+
+export async function deleteInventoryItem(id: string): Promise<Inventory> {
+  await deleteDoc(doc(db, INVENTORY_COLLECTION, id));
+  return await getInventory();
 }
 
 export interface InventoryLog {
